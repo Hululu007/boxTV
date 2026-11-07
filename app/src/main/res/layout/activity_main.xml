@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    主页布局（2026-11-07 参考 UI 设计稿改版）
+    ============================================================
+    结构（参照设计稿）：
+    ┌────────┬──────────────────────────────────────────┐
+    │ boxTV  │ 当前网络 │ 主机名称 │ 连接状态 │   [刷新]    │  ← 头部状态栏
+    │  主页  │ 我的主机                                 │
+    │  设置  │ [图块][图块][图块][图块][图块]            │  ← 内容网格
+    │        │ [图块][图块][图块][图块][图块]            │
+    └────────┴──────────────────────────────────────────┘
+    - 侧边栏（view_sidebar.xml include）：主页/设置 菜单，选中态描边胶囊 + 聚焦黑胶囊光标；
+    - 头部状态栏：当前网络 / 电脑主机名称 / 连接状态 + 刷新按钮
+      （搜索按钮已移除：搜索 = 浏览页内搜索当前文件夹内容，添加主机移入设置页）；
+    - 设置页（参照设计稿二）：「添加主机」按钮 + 当前连接主机名称 / 连接状态 / 当前网络。
+
+    TV 适配要点（历史教训）：
+    - RecyclerView 与空态容器均不参与焦点（focusable=false），
+      避免空态时 DPAD 焦点落在容器上出现系统默认灰色高亮块；
+    - clipToPadding=false 保证网格滚动到边缘时卡片不被 padding 裁切。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/home_background"
+    android:orientation="horizontal">
+
+    <!-- 左侧边栏（共享 include：boxTV + 主页/设置） -->
+    <include layout="@layout/view_sidebar" />
+
+    <!-- ============================================================
+         右侧区域：主页面板 / 设置面板（二选一显示）
+         ============================================================ -->
+    <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1">
+
+        <!-- ~~~~~~~~~~~~ 主页面板 ~~~~~~~~~~~~ -->
+        <LinearLayout
+            android:id="@+id/home_panel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <!-- 头部状态栏：网络 / 主机名 / 连接状态 + 刷新按钮 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="6dp">
+
+                <!-- 当前网络名称（Wi-Fi SSID / 以太网，启动时异步解析） -->
+                <TextView
+                    android:id="@+id/tv_network"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1.1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="当前网络：检测中…"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
+                <!-- 电脑主机名称（跟随网格焦点 / 默认第一台） -->
+                <TextView
+                    android:id="@+id/tv_host_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1.2"
+                    android:ellipsize="end"
+                    android:layout_marginStart="8dp"
+                    android:maxLines="1"
+                    android:text="电脑主机名称：—"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
+                <!-- 连接状态（聚焦主机的可达性：正常 / 已断开 / 检测中） -->
+                <TextView
+                    android:id="@+id/tv_connection"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:layout_marginStart="8dp"
+                    android:maxLines="1"
+                    android:text="连接状态：未连接"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
+                <!-- 刷新按钮：逐台 ping 检测各电脑在线状态 -->
+                <TextView
+                    android:id="@+id/btn_refresh"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:background="@drawable/bg_header_button"
+                    android:focusable="true"
+                    android:paddingHorizontal="24dp"
+                    android:paddingVertical="7dp"
+                    android:text="刷新"
+                    android:textColor="#1B1B1B"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <!-- 分区标题 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="20dp"
+                android:paddingTop="6dp"
+                android:text="我的主机"
+                android:textColor="@color/text_secondary"
+                android:textSize="15sp" />
+
+            <!-- 内容区：网格 + 空态提示（叠加显示） -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <!-- 已配对电脑网格（5 列，参照设计稿；焦点光标见 FocusHighlight） -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/host_grid"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:focusable="false"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="12dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="16dp"
+                    android:scrollbars="none" />
+
+                <!-- 空态：无已配对电脑时可聚焦，按 OK 前往设置页添加主机 -->
+                <TextView
+                    android:id="@+id/empty_hint"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:paddingHorizontal="32dp"
+                    android:paddingVertical="18dp"
+                    android:text="暂无已配对的电脑\n按 OK 键前往「设置」添加主机"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="17sp"
+                    android:visibility="gone" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- ~~~~~~~~~~~~ 设置面板（参照设计稿二） ~~~~~~~~~~~~ -->
+        <LinearLayout
+            android:id="@+id/dev_panel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/home_background"
+            android:orientation="vertical"
+            android:paddingStart="28dp"
+            android:paddingTop="24dp"
+            android:visibility="gone">
+
+            <!-- 添加主机：进入配对引导（搜索局域网电脑 / 手动输入 IP） -->
+            <TextView
+                android:id="@+id/btn_add_host"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_header_button"
+                android:focusable="true"
+                android:paddingHorizontal="28dp"
+                android:paddingVertical="10dp"
+                android:text="添加主机"
+                android:textColor="#1B1B1B"
+                android:textSize="16sp" />
+
+            <!-- 当前连接主机名称（跟随主页网格焦点 / 默认第一台） -->
+            <TextView
+                android:id="@+id/settings_host_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="当前连接主机名称：—"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+
+            <!-- 连接状态（与头部状态栏同源） -->
+            <TextView
+                android:id="@+id/settings_connection"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="连接状态：未连接"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+
+            <!-- 当前网络（与头部状态栏同源） -->
+            <TextView
+                android:id="@+id/settings_network"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="当前网络：检测中…"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+
+            <!-- 软件版本号（2026-11-07 需求：设置页显示当前电视端软件版本） -->
+            <TextView
+                android:id="@+id/settings_version"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="软件版本：—"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+
+            <!-- 检查更新（2026-11-07 局域网更新功能）：遥控器可选中，
+                 点击后扫描局域网内已配对电脑发布的电视端新版本 -->
+            <TextView
+                android:id="@+id/btn_check_update"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_header_button"
+                android:focusable="true"
+                android:paddingHorizontal="28dp"
+                android:paddingVertical="10dp"
+                android:text="检查更新"
+                android:textColor="#1B1B1B"
+                android:textSize="16sp" />
+
+            <!-- 更新流程状态行（检查中 / 已是最新 / 失败原因等，随流程刷新） -->
+            <TextView
+                android:id="@+id/settings_update_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:text=""
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+</LinearLayout>

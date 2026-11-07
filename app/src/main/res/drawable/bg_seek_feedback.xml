@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 快进/快退反馈气泡背景：半透明深色圆角 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#E6222222" />
+    <corners android:radius="22dp" />
+</shape>

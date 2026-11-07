@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    头部胶囊按钮（搜索 / 刷新）背景 selector：
+    - 常态：浅灰胶囊（参考设计稿样式）；
+    - 聚焦：变纯白提亮 + MainActivity 中叠加 bindFocusHighlight 的
+      白描边与轻微放大，遥控器光标指示更醒目。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/header_button_focused" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/header_button_normal" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+
+</selector>

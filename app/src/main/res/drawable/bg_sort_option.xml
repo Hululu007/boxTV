@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    排序下拉框选项背景 selector（2026-11-08 焦点指示修复）：
+    - 常态：深灰底（与浏览页深色主题一致）；
+    - 聚焦：提亮底色 + 白色描边光标（与全应用焦点光标风格一致，
+      仅提亮在深色弹窗上不够醒目，遥控器光标位置必须清晰可辨）。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#4D4D4D" />
+            <stroke android:width="3dp" android:color="#FFFFFF" />
+            <corners android:radius="6dp" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#2E2E2E" />
+            <corners android:radius="6dp" />
+        </shape>
+    </item>
+
+</selector>

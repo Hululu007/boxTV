@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    排序下拉框选项布局（2026-11-07 排序功能新增；2026-11-08 焦点指示修复）：
+    单行文本项，由 ArrayAdapter 通过 tv_sort_option 绑定选项文字；
+    显式 focusable 确保遥控器 DPAD 可在选项间移动焦点，
+    背景用 bg_sort_option 呈现聚焦高亮（白描边光标 + 提亮）。
+-->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/tv_sort_option"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_sort_option"
+    android:ellipsize="end"
+    android:focusable="true"
+    android:maxLines="1"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="12dp"
+    android:textColor="#FFFFFF"
+    android:textSize="15sp" />

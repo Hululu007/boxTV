@@ -1,0 +1,24 @@
+<resources>
+    <color name="background_gradient_start">#000000</color>
+    <color name="background_gradient_end">#DDDDDD</color>
+    <color name="fastlane_background">#0096a6</color>
+    <color name="search_opaque">#ffaa3f</color>
+    <color name="selected_background">#ffaa3f</color>
+    <color name="default_background">#3d3d3d</color>
+
+    <!-- ==================== 主页新版 UI 配色（参考设计稿 2026-11-07） ==================== -->
+    <!-- 内容区深灰背景 -->
+    <color name="home_background">#262626</color>
+    <!-- 侧边栏白色背景 -->
+    <color name="sidebar_background">#FFFFFF</color>
+    <!-- 侧边栏文字（黑） -->
+    <color name="sidebar_text">#1B1B1B</color>
+    <!-- 内容缩略图图块底色 -->
+    <color name="tile_background">#A6A6A6</color>
+    <!-- 头部胶囊按钮底色（未聚焦） -->
+    <color name="header_button_normal">#CFCFCF</color>
+    <!-- 头部胶囊按钮底色（聚焦：变白提亮） -->
+    <color name="header_button_focused">#FFFFFF</color>
+    <!-- 次要文字（分区标题 / 提示） -->
+    <color name="text_secondary">#AAAAAA</color>
+</resources>

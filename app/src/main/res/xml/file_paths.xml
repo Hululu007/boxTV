@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FileProvider 共享路径配置（2026-11-07 局域网更新功能）
+    files-path：Context.getFilesDir() 对应根目录；
+    updates/ 为 UpdateManager 的安装包下载目录，系统安装器经
+    content://com.example.boxtv.fileprovider/updates/update.apk 读取。
+-->
+<paths>
+    <files-path
+        name="updates"
+        path="updates/" />
+</paths>

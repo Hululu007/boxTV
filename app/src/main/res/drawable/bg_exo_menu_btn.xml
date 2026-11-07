@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放器控制条「菜单按钮」背景 selector（2026-11-08 控制栏交互优化）：
+     - 聚焦：白色半透明圆角底 + 白描边（电视端远距离观看可清晰辨识光标位置）；
+     - 按压：白色半透明圆角底（触屏/鼠标反馈）；
+     - 常态：透明（与 Media3 控制条其他按钮 selectableItemBackground 视觉一致）。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#33FFFFFF" />
+            <stroke android:width="2dp" android:color="#FFFFFF" />
+            <corners android:radius="6dp" />
+        </shape>
+    </item>
+
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#33FFFFFF" />
+            <corners android:radius="6dp" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000" />
+        </shape>
+    </item>
+
+</selector>

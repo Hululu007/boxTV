@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放器菜单按钮图标（2026-11-08 控制栏交互优化）：
+     白色汉堡菜单（三条横线），与 Media3 控制条其他白色图标视觉统一 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M3,5 L21,5 L21,7 L3,7 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M3,11 L21,11 L21,13 L3,13 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M3,17 L21,17 L21,19 L3,19 Z" />
+</vector>

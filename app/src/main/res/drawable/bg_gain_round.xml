@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    播放器菜单「音量增益 −/+」圆形按钮背景 selector（2026-11-08 增益操作改版）：
+    - 聚焦：白底（遥控器光标，配合文字颜色 selector 变黑）；
+    - 常态：深灰圆底白字（与菜单面板胶囊按钮风格一致）。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFF" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#3D3D3D" />
+        </shape>
+    </item>
+
+</selector>

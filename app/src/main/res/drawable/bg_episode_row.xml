@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    播放器菜单「选集」行背景 selector：
+    - 聚焦：深灰底 + 白色描边环（遥控器光标，与浏览页图块风格一致）；
+    - 常态：透明（列表区域融入面板底色）。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#2E2E2E" />
+            <stroke android:width="2dp" android:color="#FFFFFF" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+
+</selector>

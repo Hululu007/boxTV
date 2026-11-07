@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    主页网格卡片（2026-11-07 参考设计稿）：缩略图图块 + 名称
+    - 图块：圆角浅灰底（bg_content_tile）+ 居中电脑图标；
+      焦点光标（白色描边 + 轻微放大）由 FocusHighlight.kt 以前景方式叠加，
+      仅包住图块、不包含下方名称 —— 与设计稿光标选中图一致；
+    - 名称：图块下方居中白字，单行省略。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="14dp"
+    android:layout_marginBottom="18dp"
+    android:orientation="vertical">
+
+    <!-- 缩略图图块（焦点落点：可聚焦 + 点击/长按事件绑定在此） -->
+    <FrameLayout
+        android:id="@+id/tile"
+        android:layout_width="match_parent"
+        android:layout_height="92dp"
+        android:background="@drawable/bg_content_tile"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:layout_gravity="center"
+            android:contentDescription="主机图标"
+            android:scaleType="fitCenter"
+            android:src="@drawable/app_icon_your_company" />
+    </FrameLayout>
+
+    <!-- 主机名称 -->
+    <TextView
+        android:id="@+id/tv_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+</LinearLayout>

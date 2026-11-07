@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    内容缩略图图块背景（2026-11-07 参考设计稿）：
+    - 常态：圆角浅灰矩形（设计稿「内容缩略图」底色）；
+    - 聚焦：叠加白色描边环 = 遥控器光标（与 FocusHighlight 的放大动效配合）。
+      光标环做在背景层（而非 foreground）：foreground 在部分机型/视图层级上
+      描边渲染不可靠（实测仅底边可见），背景 layer-list 渲染位置由系统保证。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 聚焦：浅灰底 + 白色描边环（光标） -->
+    <item android:state_focused="true">
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/tile_background" />
+                    <corners android:radius="12dp" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <stroke android:width="3dp" android:color="#FFFFFF" />
+                    <corners android:radius="12dp" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+
+    <!-- 常态：浅灰底 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/tile_background" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+
+</selector>

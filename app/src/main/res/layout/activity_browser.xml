@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    浏览页布局（2026-11-07 参考 UI 设计稿改版，与主页统一框架）
+    ============================================================
+    结构（参照设计稿「boxTV主机-内容列表」）：
+    ┌────────┬──────────────────────────────────────────┐
+    │ boxTV  │ 当前网络 │ 主机名称 │ 连接状态 │ [搜索][刷新] │  ← 头部状态栏
+    │ *主页* │ 主机名称-文件夹名称                       │  ← 面包屑（当前位置）
+    │  设置  │ [图块][图块][图块][图块][图块]            │  ← 内容网格
+    │        │ [图块][图块][图块][图块][图块]            │
+    └────────┴──────────────────────────────────────────┘
+    - 面包屑格式：主机名-文件夹1-文件夹2-…（进文件夹逐级追加，方便定位当前位置）；
+    - 根目录网格显示电脑端授权的文件夹图块，进入后显示子文件夹与视频；
+    - 搜索按钮：在当前文件夹内递归搜索视频（不再是搜索新主机）。
+
+    顶栏收起（历史硬约束）：header_container（状态栏+面包屑）随网格滚动用
+    GONE/VISIBLE 切换收起/恢复——保留网格 RecyclerView 虚拟化，大文件夹不全量渲染；
+    收起后顶栏不参与焦点搜索，遥控器 UP 到第 0 行自然滚回顶部触发恢复。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/home_background"
+    android:orientation="horizontal">
+
+    <!-- 左侧边栏（共享 include：boxTV + 主页/设置） -->
+    <include layout="@layout/view_sidebar" />
+
+    <!-- 右侧内容区 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <!-- 顶栏容器：随内容滚动收起/恢复 -->
+        <LinearLayout
+            android:id="@+id/header_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- 头部状态栏：网络 / 主机名 / 连接状态 + 搜索、刷新按钮 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="6dp">
+
+                <!-- 当前网络名称（与主页同源解析） -->
+                <TextView
+                    android:id="@+id/tv_network"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1.1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="当前网络：检测中…"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
+                <!-- 电脑主机名称（当前正在浏览的主机，静态） -->
+                <TextView
+                    android:id="@+id/tv_host_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1.2"
+                    android:ellipsize="end"
+                    android:layout_marginStart="8dp"
+                    android:maxLines="1"
+                    android:text="电脑主机名称：—"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
+                <!-- 连接状态（由文件夹列表加载结果推导：正常/已断开） -->
+                <TextView
+                    android:id="@+id/tv_connection"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:layout_marginStart="8dp"
+                    android:maxLines="1"
+                    android:text="连接状态：连接中…"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
+                <!-- 搜索按钮：在当前文件夹内递归搜索视频 -->
+                <TextView
+                    android:id="@+id/btn_search"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:background="@drawable/bg_header_button"
+                    android:focusable="true"
+                    android:paddingHorizontal="24dp"
+                    android:paddingVertical="7dp"
+                    android:text="搜索"
+                    android:textColor="#1B1B1B"
+                    android:textSize="15sp" />
+
+                <!-- 刷新按钮：重新拉取授权文件夹 + 当前目录内容 -->
+                <TextView
+                    android:id="@+id/btn_refresh"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:background="@drawable/bg_header_button"
+                    android:focusable="true"
+                    android:paddingHorizontal="24dp"
+                    android:paddingVertical="7dp"
+                    android:text="刷新"
+                    android:textColor="#1B1B1B"
+                    android:textSize="15sp" />
+
+                <!-- 排序按钮：点击弹出排序方式下拉框（2026-11-07 用户需求，
+                     位于「刷新」右侧，与设计稿「boxTV主机-内容列表」一致） -->
+                <TextView
+                    android:id="@+id/btn_sort"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:background="@drawable/bg_header_button"
+                    android:focusable="true"
+                    android:paddingHorizontal="24dp"
+                    android:paddingVertical="7dp"
+                    android:text="排序"
+                    android:textColor="#1B1B1B"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <!-- 面包屑：主机名-文件夹1-文件夹2-…（当前位置） -->
+            <TextView
+                android:id="@+id/breadcrumb"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="20dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="8dp"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:text="加载中…"
+                android:textColor="@color/text_secondary"
+                android:textSize="15sp" />
+
+        </LinearLayout>
+
+        <!-- 主体：授权文件夹 / 子文件夹 / 视频网格（5 列，与主页一致） -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/content_grid"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:focusable="false"
+            android:paddingStart="20dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="16dp"
+            android:scrollbars="none" />
+
+    </LinearLayout>
+
+</LinearLayout>

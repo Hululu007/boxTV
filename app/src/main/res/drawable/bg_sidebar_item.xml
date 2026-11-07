@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    侧边栏菜单项背景（三态 selector，2026-11-07 主页改版）：
+    - 聚焦（遥控器光标停在上面）：实心黑色胶囊 = 光标指示，白底上对比最强烈；
+    - 选中（当前所在页面）：黑色描边胶囊 = 页面归属标识（如「主页」高亮框）；
+    - 常态：透明。
+    注意：state_focused 必须排在 state_selected 之前，
+    这样「聚焦 + 选中」同时成立时显示实心胶囊（聚焦优先级更高）。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 聚焦：实心黑胶囊（遥控器光标） -->
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#1B1B1B" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+
+    <!-- 选中：黑描边胶囊（当前页面标识） -->
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <stroke android:width="2dp" android:color="#1B1B1B" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+
+    <!-- 常态：透明 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+        </shape>
+    </item>
+
+</selector>

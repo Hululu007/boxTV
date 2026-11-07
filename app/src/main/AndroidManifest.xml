@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 局域网访问需要网络权限（细则 4.2/4.3 全部 HTTP 通信） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 主页头部状态栏「当前网络」显示：读取 Wi-Fi 名称 / 网络连接类型（普通权限，无需动态申请） -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- 局域网应用更新（2026-11-07）：请求安装本地下载的 APK 安装包 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
+        设备特性声明（2026-11-07 真机兼容修复）：
+        - touchscreen required=false：TV 无触摸屏也能安装；
+        - leanback required=false：部分国产电视/盒子系统不声明 leanback 特性，
+          required=true 会被其安装器/应用商店过滤导致"装不上或不显示"。
+          声明本身仍表示已适配 TV，false 仅为放宽安装门槛（标准 TV 不受影响）。
+    -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+
+    <application
+        android:name=".BoxTvApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
+        android:theme="@style/Theme.BoxTV">
+        <!--
+            主入口（2026-11-07 真机兼容修复）：
+            - LEANBACK_LAUNCHER：标准 Android TV 桌面/应用列表入口；
+            - LAUNCHER：国产电视/盒子定制桌面多数只扫描通用 LAUNCHER 类别，
+              缺失会导致"安装成功但应用列表不显示、无法打开"。
+            两个类别共存互不影响，双端桌面均可显示图标。
+        -->
+        <activity
+            android:name=".ui.main.MainActivity"
+            android:banner="@drawable/app_icon_your_company"
+            android:exported="true"
+            android:icon="@drawable/app_icon_your_company"
+            android:label="@string/app_name"
+            android:logo="@drawable/app_icon_your_company"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- 配对引导（搜索主机 → 发起配对请求 → 电脑端允许后完成，细则 4.2） -->
+        <activity
+            android:name=".ui.pairing.PairingActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <!-- 文件夹浏览（授权文件夹选择 / 视频网格 / 子目录导航 / 搜索） -->
+        <activity
+            android:name=".ui.browser.HostBrowserActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <!-- 视频播放（ExoPlayer 流式播放；2026-11-07 起浏览页点击缩略图直达本页，详情页已移除） -->
+        <activity
+            android:name=".ui.playback.PlaybackActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!--
+            局域网应用更新（2026-11-07）：
+            - FileProvider：向系统安装器共享 filesDir/updates 下的 APK（file:// 已禁止）；
+            - UpdateDoneReceiver：安装完成（MY_PACKAGE_REPLACED）后自动重启应用，
+              引导用户完成版本迭代（新版本首启提示已更新）。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <receiver
+            android:name=".UpdateDoneReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

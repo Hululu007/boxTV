@@ -1,0 +1,31 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+boxTV-host/build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# IDE / 构建辅助产物
+.idea/
+.kotlin/
+bin/
+.screenshots/
+
+# UI 自动化调试产物
+ui9.txt
+
+# 超过 GitHub 100MB 限制的大文件：ffmpeg 工具链与电脑端安装包（见 README「获取 ffmpeg」）
+tools/*.exe
+boxTV-host/tools/*.exe
+boxTV-host/resources/windows/tools/*.exe
+deliverables/*.msi

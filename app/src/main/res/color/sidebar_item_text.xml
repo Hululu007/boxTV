@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    侧边栏菜单项文字颜色 selector：
+    - 聚焦：白色（配实心黑胶囊背景，与 bg_sidebar_item.xml 联动）；
+    - 其余（选中/常态）：黑色。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true" android:color="#FFFFFF" />
+    <item android:color="#1B1B1B" />
+</selector>

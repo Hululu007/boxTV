@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    更新下载进度弹窗（2026-11-07 局域网更新功能）
+    显示下载进度条 + 百分比/字节数 + 状态文案，底部为
+    [暂停/继续] [取消]（失败态变为 [重试] [关闭]）。
+    按钮行为由 MainActivity 根据 UpdateManager.DownloadState 动态刷新。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="20dp"
+    android:paddingBottom="8dp">
+
+    <!-- 版本信息行 -->
+    <TextView
+        android:id="@+id/dlg_update_version"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="正在下载新版本"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp" />
+
+    <!-- 横向进度条 -->
+    <ProgressBar
+        android:id="@+id/dlg_update_progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:max="100" />
+
+    <!-- 百分比 + 已下载/总大小 -->
+    <TextView
+        android:id="@+id/dlg_update_detail"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="0%"
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp" />
+
+    <!-- 状态/错误文案（校验中 / 失败原因与重试提示） -->
+    <TextView
+        android:id="@+id/dlg_update_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text=""
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
+
+</LinearLayout>

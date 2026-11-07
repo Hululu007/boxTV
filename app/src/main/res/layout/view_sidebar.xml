@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    共享侧边栏（2026-11-07 主页/浏览页统一框架，参考设计稿）：
+    白色背景 + boxTV 标识 + 「主页 / 设置」菜单。
+    - 选中态（当前所在页面）：黑描边胶囊（bg_sidebar_item state_selected）；
+    - 聚焦态（遥控器光标）：实心黑胶囊 + 白字（bg_sidebar_item state_focused
+      + sidebar_item_text 颜色 selector 联动）；
+    - 聚焦轻微缩放动效由代码 bindSidebarFocusScale() 绑定。
+    主页与浏览页通过 <include> 复用本布局，选中态由各自 Activity 设置。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="112dp"
+    android:layout_height="match_parent"
+    android:background="@color/sidebar_background"
+    android:orientation="vertical"
+    android:paddingTop="14dp">
+
+    <!-- 应用标识 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:paddingStart="14dp"
+        android:paddingBottom="10dp"
+        android:text="@string/app_name"
+        android:textColor="@color/sidebar_text"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <!-- 菜单：主页 -->
+    <TextView
+        android:id="@+id/sidebar_home"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/bg_sidebar_item"
+        android:focusable="true"
+        android:gravity="center"
+        android:paddingVertical="9dp"
+        android:text="主页"
+        android:textColor="@color/sidebar_item_text"
+        android:textSize="17sp" />
+
+    <!-- 菜单：设置 -->
+    <TextView
+        android:id="@+id/sidebar_settings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_sidebar_item"
+        android:focusable="true"
+        android:gravity="center"
+        android:paddingVertical="9dp"
+        android:text="设置"
+        android:textColor="@color/sidebar_item_text"
+        android:textSize="17sp" />
+
+</LinearLayout>

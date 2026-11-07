@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放器菜单「音量增益值」显示胶囊背景（2026-11-08 增益操作改版）：
+     白底圆角胶囊黑字，固定样式（仅展示当前增益，不可聚焦） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FFFFFF" />
+    <corners android:radius="20dp" />
+</shape>

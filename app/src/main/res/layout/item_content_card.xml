@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    浏览页内容卡片（2026-11-07 参考设计稿）：缩略图图块 + 名称
+    - 图块：圆角浅灰底（bg_content_tile，聚焦态自带白色光标环）；
+      图块设置 clipToOutline 后视频缩略图同样裁出圆角；
+    - iv_thumb：视频缩略图（Glide 加载电脑端关键帧，铺满图块 centerCrop）；
+    - iv_folder：文件夹图标（居中，子文件夹/根目录授权文件夹用）；
+      两者按条目类型二选一显示；
+    - 名称：图块下方居中白字，单行省略。
+    焦点光标（白描边 + 轻微放大）与主页网格同一套方案
+    （背景 selector 光标环 + FocusHighlight 缩放）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="14dp"
+    android:layout_marginBottom="18dp"
+    android:orientation="vertical">
+
+    <!-- 缩略图图块（焦点落点：可聚焦 + 点击事件绑定在此） -->
+    <FrameLayout
+        android:id="@+id/tile"
+        android:layout_width="match_parent"
+        android:layout_height="92dp"
+        android:background="@drawable/bg_content_tile"
+        android:focusable="true">
+
+        <!-- 视频缩略图（铺满图块） -->
+        <ImageView
+            android:id="@+id/iv_thumb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="视频缩略图"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
+        <!-- 文件夹图标（居中） -->
+        <ImageView
+            android:id="@+id/iv_folder"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="center"
+            android:contentDescription="文件夹"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_folder"
+            android:visibility="visible" />
+    </FrameLayout>
+
+    <!-- 内容名称（文件夹名 / 视频文件名） -->
+    <TextView
+        android:id="@+id/tv_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+</LinearLayout>
