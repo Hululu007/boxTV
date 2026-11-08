@@ -6,12 +6,16 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.application.install
+import io.ktor.server.application.createApplicationPlugin
+import io.ktor.server.application.hooks.ResponseSent
+import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.netty.NettyApplicationEngine
 import io.ktor.server.plugins.partialcontent.PartialContent
 import io.ktor.server.request.receive
+import io.ktor.server.request.path
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondFile
 import io.ktor.server.response.respondText
@@ -53,11 +57,14 @@ class HostServer(
 ) {
 
     companion object {
-        /** 电脑端软件版本（发现应答与 /api/ping 返回；2026-11-08 免输入配对重构升级至 1.2.2） */
-        const val VERSION = "1.2.2"
+        /** 电脑端软件版本（发现应答与 /api/ping 返回；2026-11-09 40400 诊断加固升级至 1.2.3） */
+        const val VERSION = "1.2.3"
 
         /** Host 头合法性（仅允许 ip/域名:port 的安全字符，防止注入改写播放列表的绝对地址） */
         private val hostPattern = Regex("""^[A-Za-z0-9.\-:\[\]]+$""")
+
+        /** 请求起始时间在 ApplicationCall attributes 中的键（失败日志耗时统计用） */
+        val ReqStartTime = io.ktor.util.AttributeKey<Long>("boxtv-req-start")
     }
 
     /** JSON 编解码配置：输出默认值、省略 null 字段 */
@@ -100,6 +107,37 @@ class HostServer(
         // HTTP Range 分段传输：视频流支持 Range 请求（细则 4.3 节 stream 接口强制要求）
         install(PartialContent)
 
+        // ------------------------------------------------------------------
+        // 2026-11-09 失败请求监控埋点（40400 偶现问题诊断专项）：
+        // 旧版 AccessLogger 只记录路由内显式打点的成功行为，失败响应（404/403/5xx）
+        // 完全不落日志——偶现 40400 发生时无法回溯。本插件在「每个请求」上：
+        // 1. 入口记录起始时间（纳秒）；
+        // 2. 响应发送后检查状态码，>= 400 时把「路径+查询串+HTTP 状态+耗时」
+        //    写入访问日志（设备名显示为「系统」）并输出控制台，
+        //    覆盖缩略图降级 404、meta 探测失败 404、分片瞬时缺失等全部异常场景。
+        // ------------------------------------------------------------------
+        val failureMonitor = createApplicationPlugin("BoxTvFailureMonitor") {
+            onCall { call ->
+                call.attributes.put(ReqStartTime, System.nanoTime())
+            }
+            on(ResponseSent) { call ->
+                val status = call.response.status() ?: return@on
+                if (status.value >= 400) {
+                    val elapsedMs = call.attributes.getOrNull(ReqStartTime)
+                        ?.let { (System.nanoTime() - it) / 1_000_000 } ?: -1
+                    // 完整 URI（路径 + 查询串）；查询串过长（分片请求 u 参数等）截断，保证日志条目可读
+                    val rawUri = call.request.path() +
+                        call.request.queryParameters.entries().joinToString("&") { p ->
+                            "${p.key}=${p.value.firstOrNull() ?: ""}"
+                        }.ifEmpty { "" }.let { q -> if (q.isEmpty()) "" else "?$q" }
+                    val displayUri = if (rawUri.length > 160) rawUri.take(160) + "…" else rawUri
+                    logger.log("系统", "异常", "HTTP ${status.value} $displayUri（耗时 ${elapsedMs}ms）")
+                    println("[boxTV] FAILED HTTP ${status.value} $displayUri (${elapsedMs}ms)")
+                }
+            }
+        }
+        install(failureMonitor)
+
         routing {
             routePing()
             routePairing()
@@ -132,6 +170,50 @@ class HostServer(
     /** 按 id 查找已授权文件夹（不存在返回 null） */
     private fun findFolder(folderId: String): AuthorizedFolder? {
         return store.peek().folders.firstOrNull { it.id == folderId }
+    }
+
+    /**
+     * 文件可读性预检（2026-11-09 40400 诊断专项）。
+     *
+     * 背景：Windows 下视频文件被其他进程独占锁定（杀软实时扫描/下载器写盘/
+     * 云同步占位）时，Ktor respondFile 打开输入通道会失败，但此时 HTTP 200
+     * 响应头已经发出——电视端实际收到「200 + 0 字节」的静默截断响应（实测），
+     * ExoPlayer 中途 EOF 报 IO 错误且电脑端无任何日志痕迹。
+     *
+     * 处理：下发文件前先试开一次文件流，失败则显式回 50000 并落访问日志。
+     * 显式错误码会被 ExoPlayer 按可重试 IO 错误处理（内置退避重试），
+     * 与静默截断相比：日志可追溯 + 重试语义更明确。
+     *
+     * @return true = 可读可继续下发；false = 已回写错误响应，调用方立即结束
+     */
+    private suspend fun ApplicationCall.preflightReadable(file: File): Boolean = try {
+        file.inputStream().use { }
+        true
+    } catch (e: Exception) {
+        logger.log("系统", "播放异常", "文件被占用不可读：${file.name}（${e.message}）")
+        respondError(HttpStatusCode.InternalServerError, ApiCodes.INTERNAL_ERROR, "文件被占用或不可读，请稍后重试")
+        false
+    }
+
+    /**
+     * 播放列表改写下发（2026-11-09 加固）：读取本地 m3u8 内容失败
+     * （文件被锁定/瞬时不可读）时改写函数会抛 IO 异常，此处兜底转为
+     * 显式 50000 响应并落日志，避免异常冒泡成无日志的连接重置。
+     */
+    private suspend fun ApplicationCall.respondPlaylist(
+        playlist: File,
+        root: File,
+        authority: String,
+        videoId: String
+    ) {
+        val body = try {
+            m3u8.rewritten(playlist, root, authority, videoId)
+        } catch (e: Exception) {
+            logger.log("系统", "播放异常", "播放列表读取失败：${playlist.name}（${e.message}）")
+            respondError(HttpStatusCode.InternalServerError, ApiCodes.INTERNAL_ERROR, "播放列表暂不可读，请稍后重试")
+            return
+        }
+        respondText(body, ContentType.parse("application/vnd.apple.mpegurl"))
     }
 
     /** 校验并返回请求 Host 头（作为改写播放列表里绝对地址的 authority）；非法返回 null */
@@ -477,10 +559,7 @@ class HostServer(
                 val authority = sanitizeAuthority(call.request.headers["Host"])
                     ?: return@get call.respondError(HttpStatusCode.BadRequest, ApiCodes.BAD_REQUEST, "Host 头缺失或非法")
                 logger.log(device.name, "播放", "${folder.name}/$relativePath（HLS 原画）")
-                call.respondText(
-                    m3u8.rewritten(file, root, authority, videoId),
-                    ContentType.parse("application/vnd.apple.mpegurl")
-                )
+                call.respondPlaylist(file, root, authority, videoId)
                 return@get
             }
 
@@ -510,7 +589,10 @@ class HostServer(
             } else {
                 // 原画直连分支：respondFile + PartialContent 插件自动处理 Range 分段请求；
                 // Content-Type 由文件扩展名自动推断（ExoPlayer 对视频 MIME 类型不敏感，兼容 Octet-Stream）
-                call.respondFile(file)
+                // 2026-11-09：先做可读性预检——文件被独占锁定时旧实现会静默下发空响应体
+                if (call.preflightReadable(file)) {
+                    call.respondFile(file)
+                }
             }
         }
 
@@ -550,16 +632,16 @@ class HostServer(
             }
 
             if (file.extension.equals("m3u8", ignoreCase = true)) {
-                // 子播放列表：递归改写其中的相对 URI 后下发
+                // 子播放列表：递归改写其中的相对 URI 后下发（2026-11-09 改为带异常兜底的统一出口）
                 val authority = sanitizeAuthority(call.request.headers["Host"])
                     ?: return@get call.respondError(HttpStatusCode.BadRequest, ApiCodes.BAD_REQUEST, "Host 头缺失或非法")
-                call.respondText(
-                    m3u8.rewritten(file, File(folder.path).canonicalFile, authority, videoId),
-                    ContentType.parse("application/vnd.apple.mpegurl")
-                )
+                call.respondPlaylist(file, File(folder.path).canonicalFile, authority, videoId)
             } else {
                 // 视频分片 / AES 密钥 / 初始化段：原样下发（Range 由 PartialContent 处理）
-                call.respondFile(file)
+                // 2026-11-09：先做可读性预检——文件被独占锁定时旧实现会静默下发空响应体
+                if (call.preflightReadable(file)) {
+                    call.respondFile(file)
+                }
             }
         }
 

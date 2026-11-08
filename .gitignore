@@ -29,3 +29,6 @@ tools/*.exe
 boxTV-host/tools/*.exe
 boxTV-host/resources/windows/tools/*.exe
 deliverables/*.msi
+
+# 电脑端免安装绿色便携包（288MB，超过 GitHub 100MB 单文件限制，仅本地交付不入库）
+deliverables/boxTVHost-*-portable-win64.zip

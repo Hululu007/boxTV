@@ -711,18 +711,27 @@ private fun SettingsPanel(
         Spacer(modifier = Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
+                // 开发模式下禁止开启：写注册表会把 java -cp 开发路径写入 Run 键造成卸载残留
+                enabled = AutoStartManager.isPackaged,
                 checked = autoStart,
                 onCheckedChange = { checked ->
                     val ok = if (checked) AutoStartManager.enable() else AutoStartManager.disable()
                     if (ok) {
                         autoStart = checked
                         showMessage(if (checked) "已开启开机自启（当前用户注册表）" else "已关闭开机自启")
+                    } else if (!AutoStartManager.isPackaged) {
+                        showMessage("开发模式下不支持开机自启，仅安装版可用")
                     } else {
                         showMessage("注册表操作失败，请检查系统权限")
                     }
                 }
             )
-            Text("开机自启（写入当前用户注册表 Run 键）")
+            Text(
+                text = if (AutoStartManager.isPackaged) "开机自启（写入当前用户注册表 Run 键）"
+                else "开机自启（开发模式下不可用，安装版可开启）",
+                color = if (AutoStartManager.isPackaged) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(

@@ -78,13 +78,14 @@ boxTV/
 
 ## 使用方法
 
-### 1. 安装电脑端
-- 运行 `deliverables/boxTVHost-1.0.0.msi`（或从源码构建，见下文），启动后程序驻留系统托盘；
+### 1. 安装电脑端（免安装绿色版）
+- 解压 `deliverables/boxTVHost-<版本>-portable-win64.zip` 到任意目录（如 `D:\boxTV\`），双击 `boxTVHost\boxTVHost.exe` 即可运行——**无需安装、无需 Java 环境**（包内自带运行时）；
 - 在设置中添加**授权文件夹**（即允许电视端访问的本地视频目录）、修改主机名与端口（默认 8964）；
-- 建议在 Windows 防火墙放行该程序（应用内提供一键放行）。
+- 建议在 Windows 防火墙放行（应用内提供一键放行）；
+- 升级：关闭程序 → 用新版本解压目录内的文件覆盖旧目录 → 重新运行（配置与配对数据保存在 `%APPDATA%\boxTV\`，自动保留）。
 
 ### 2. 安装电视端
-- 将 `deliverables/boxTV-1.3.8.apk` 安装到 Android TV / 盒子（U 盘侧载或 `adb install`）；
+- 将 `deliverables/boxTV-1.3.11.apk` 安装到 Android TV / 盒子（U 盘侧载或 `adb install`）；
 - 要求 Android 10（API 29）及以上。
 
 ### 3. 配对连接
@@ -105,8 +106,8 @@ boxTV/
 
 ### 构建电脑端
 ```powershell
-./gradlew :boxTV-host:packageDistributionForCurrentOS   # 生成 MSI 安装包
-./gradlew :boxTV-host:run                               # 开发模式直接运行
+./gradlew :boxTV-host:deliverPortable   # 打包免安装绿色便携版 zip（自动复制到 deliverables/）
+./gradlew :boxTV-host:run               # 开发模式直接运行（改代码即跑，无需打包安装）
 ```
 
 ### 构建电视端
@@ -127,6 +128,28 @@ boxTV/
 - **大码率 4K 片源**：电视硬解不动时由电脑端实时转 1080P，弱网环境降到 720P/480P 省流量；
 - **离线内网环境**：无公网、无云服务依赖，适合宿舍、办公室、隔离网络等场景；
 - **技术学习参考**：完整演示了局域网设备发现（UDP 广播）、人工授权配对、Token 鉴权、HTTP Range 流式传输、ffmpeg 管道推流、HLS 播放列表改写等工程实践。
+
+## 卸载指南（免安装版）
+
+电脑端为绿色便携版，无系统级安装，卸载只需三步：
+
+1. **先退出电脑端后台**：右键系统托盘中的 boxTV 图标 → 退出（点击窗口关闭按钮只是最小化到托盘，进程不会退出）；
+2. 删除解压目录（如 `D:\boxTV\`）；
+3. 按需手动清理：
+   - 配置与缩略图缓存目录 `%APPDATA%\boxTV`；
+   - 若曾开启开机自启：管理员运行 `reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v boxTV /f`（未删除时该注册表项指向已删除的路径，Windows 启动时会静默忽略，无副作用）；
+   - 防火墙规则（名为 `boxTV Host` 的 TCP/UDP 入站规则）：管理员运行 `netsh advfirewall firewall delete rule name="boxTV Host"`。
+
+电视端卸载即系统标准的「卸载应用」，可按需清除其本地存储（播放进度、历史记录）。
+
+## 版本历史
+
+| 日期 | 版本 | 更新内容 |
+|---|---|---|
+| 2026-11-11 | 电视端 v1.3.11 | 修复浏览页遥控器连按导致路径重复入栈产生的 40400「目录不存在」错误：目录加载防重入 + 相邻同名段去重 + 浏览 404 自动回退上一层自愈 |
+| 2026-11-09 | 电脑端 v1.2.3 / 便携版 | **移除 MSI 安装包方案，改为免安装绿色便携版**（解压即用、整目录替换升级，`deliverPortable` 一键打包）；M3U8 聚合播放与配置并发访问加固，补充失败请求日志埋点 |
+| 2026-11-09 | 电视端 v1.3.10 | 40400 偶现播放异常双端排查加固：API 错误码与播放器错误原因链日志埋点 |
+| 2026-11-08 | 电视端 v1.3.x | 观看历史记录：主页历史卡片、断点续播直达、影片跨主机自动重新定位 |
 
 ## 安全说明
 

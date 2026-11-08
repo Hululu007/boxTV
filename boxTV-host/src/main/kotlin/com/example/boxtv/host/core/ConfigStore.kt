@@ -89,17 +89,24 @@ class ConfigStore(private val file: Path) {
     /**
      * 高频操作专用：仅更新内存中设备的 lastConnectedAt 并打脏标记，不立即写盘。
      * 由 [startAutoFlush] 定时批量落盘。
+     *
+     * 2026-11-09 并发加固：本方法在「每个携带 Token 的请求」上都会被调用
+     * （DeviceRegistry.findByToken），必须与结构性修改 [update] 持同一把互斥锁。
+     * 旧实现无锁读改写整个 config 对象，与 update() 并发时会把结构性变更
+     * （授权文件夹/设备记录）整体回退，导致电视端偶发 40400「授权文件夹不存在」。
      */
-    fun touchDeviceLastSeen(deviceUuid: String) {
-        // 浅拷贝 devices 列表，替换目标设备的 lastConnectedAt
-        val devices = config.devices.map {
-            if (it.deviceUuid == deviceUuid && it.lastConnectedAt != now()) {
-                it.copy(lastConnectedAt = now())
-            } else it
-        }
-        if (devices != config.devices) {
-            config = config.copy(devices = devices)
-            dirty = true
+    suspend fun touchDeviceLastSeen(deviceUuid: String) {
+        mutex.withLock {
+            // 浅拷贝 devices 列表，替换目标设备的 lastConnectedAt
+            val devices = config.devices.map {
+                if (it.deviceUuid == deviceUuid && it.lastConnectedAt != now()) {
+                    it.copy(lastConnectedAt = now())
+                } else it
+            }
+            if (devices != config.devices) {
+                config = config.copy(devices = devices)
+                dirty = true
+            }
         }
     }
 
