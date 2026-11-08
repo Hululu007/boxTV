@@ -42,6 +42,23 @@
         android:textColor="@color/sidebar_item_text"
         android:textSize="17sp" />
 
+    <!-- 菜单：历史（2026-11-08 历史记录页入口，样式与主页/设置完全一致；
+         选中态描边胶囊 / 聚焦态实心黑胶囊由 bg_sidebar_item selector 统一提供） -->
+    <TextView
+        android:id="@+id/sidebar_history"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_sidebar_item"
+        android:focusable="true"
+        android:gravity="center"
+        android:paddingVertical="9dp"
+        android:text="历史"
+        android:textColor="@color/sidebar_item_text"
+        android:textSize="17sp" />
+
     <!-- 菜单：设置 -->
     <TextView
         android:id="@+id/sidebar_settings"

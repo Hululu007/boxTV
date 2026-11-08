@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
@@ -18,22 +19,33 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.bumptech.glide.Glide
+import com.bumptech.glide.load.model.GlideUrl
+import com.bumptech.glide.load.model.LazyHeaders
 import com.example.boxtv.BoxTvApp
 import com.example.boxtv.R
 import com.example.boxtv.data.remote.ApiResult
 import com.example.boxtv.data.remote.UpdateCheckData
+import com.example.boxtv.data.remote.VideoIdCodec
 import com.example.boxtv.data.update.UpdateManager
+import com.example.boxtv.model.Folder
 import com.example.boxtv.model.PairedHost
+import com.example.boxtv.model.PlaybackProgress
+import com.example.boxtv.model.VideoEntry
 import com.example.boxtv.ui.browser.HostBrowserActivity
 import com.example.boxtv.ui.common.NetworkName
 import com.example.boxtv.ui.common.bindFocusHighlight
 import com.example.boxtv.ui.common.bindSidebarFocusScale
 import com.example.boxtv.ui.common.resetFocusHighlight
 import com.example.boxtv.ui.pairing.PairingActivity
+import com.example.boxtv.ui.playback.PlaybackActivity
 import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -83,6 +95,55 @@ class MainActivity : FragmentActivity() {
     // 设置面板（2026-11-07 局域网更新）：检查更新状态行
     private lateinit var settingsUpdateStatus: TextView
 
+    // ------------------------------------------------------------------
+    // 历史记录页（2026-11-08 历史功能模块，参照设计稿）
+    // ------------------------------------------------------------------
+    private lateinit var historyItem: TextView        // 侧边栏「历史」菜单
+    private lateinit var historyPanel: View           // 历史面板容器
+    private lateinit var histNetwork: TextView        // 头部：当前网络
+    private lateinit var histHostName: TextView       // 头部：电脑主机名称（跟随卡片焦点联动）
+    private lateinit var histConnection: TextView     // 头部：连接状态
+    private lateinit var historyGrid: RecyclerView    // 历史网格（5 列）
+    private lateinit var historyEmpty: TextView       // 空态提示
+    private lateinit var historyAdapter: HistoryGridAdapter
+
+    /** 历史校验进行中标记（防重复并发：进入页面/手动刷新/播放返回共用） */
+    private var loadingHistory = false
+
+    /** 历史网格首卡初始聚焦标记（与浏览页 initialFocusDone 同策略） */
+    private var histFocusDone = false
+
+    /** 从历史页进入播放页的标记：返回时静默重载历史（进度可能已推进） */
+    private var returnFromPlayback = false
+
+    /**
+     * 历史条目（校验后的展示模型）。
+     * 一条播放进度记录经「影片存在性校验」后生成：
+     * 影片在原主机或其他已配置主机上被重新定位到才保留。
+     *
+     * @param progress  原始播放进度记录（含断点位置/时长/原主机 id）
+     * @param host      影片当前实际所在主机（优先原主机，其余主机兜底）
+     * @param videoId   在该主机上重新定位到的 videoId（Base64URL(folderId|相对路径)）
+     * @param name      影片名称（文件名）
+     * @param isM3u8    是否为 M3U8 聚合条目（播放页走 HLS 直连分支）
+     * @param percent   播放进度百分比（positionMs / durationMs）
+     * @param thumbUrl  缩略图地址（校验时按所属主机构造，适配器直接加载）
+     * @param token     所属主机的访问令牌（缩略图请求头，Token 不落 URL）
+     */
+    private data class HistoryItem(
+        val progress: PlaybackProgress,
+        val host: PairedHost,
+        val videoId: String,
+        val name: String,
+        val isM3u8: Boolean,
+        val percent: Int,
+        val thumbUrl: String,
+        val token: String
+    ) {
+        /** 信息行文案（与设计稿格式一致：「主机名 片名 进度xx%」） */
+        val caption: String get() = "${host.name} $name 进度$percent%"
+    }
+
     /** 头部当前展示的主机名（设置面板「当前连接主机名称」同源复用） */
     private var headerHostName: String? = null
 
@@ -123,6 +184,9 @@ class MainActivity : FragmentActivity() {
         /** 侧边栏页签：设置 */
         const val TAB_SETTINGS = 1
 
+        /** 侧边栏页签：历史记录（2026-11-08 历史功能模块；保持既有常量值不变，新增追加） */
+        const val TAB_HISTORY = 2
+
         /** Intent Extra：主页初始页签（浏览页侧边栏跳设置页用） */
         const val EXTRA_OPEN_TAB = "openTab"
 
@@ -135,14 +199,21 @@ class MainActivity : FragmentActivity() {
         setContentView(R.layout.activity_main)
 
         homeItem = findViewById(R.id.sidebar_home)
+        historyItem = findViewById(R.id.sidebar_history)
         settingsItem = findViewById(R.id.sidebar_settings)
         homePanel = findViewById(R.id.home_panel)
         devPanel = findViewById(R.id.dev_panel)
+        historyPanel = findViewById(R.id.history_panel)
         tvNetwork = findViewById(R.id.tv_network)
         tvHostName = findViewById(R.id.tv_host_name)
         tvConnection = findViewById(R.id.tv_connection)
         emptyHint = findViewById(R.id.empty_hint)
         hostGrid = findViewById(R.id.host_grid)
+        histNetwork = findViewById(R.id.hist_network)
+        histHostName = findViewById(R.id.hist_host_name)
+        histConnection = findViewById(R.id.hist_connection)
+        historyGrid = findViewById(R.id.history_grid)
+        historyEmpty = findViewById(R.id.history_empty)
         settingsHostName = findViewById(R.id.settings_host_name)
         settingsConnection = findViewById(R.id.settings_connection)
         settingsNetwork = findViewById(R.id.settings_network)
@@ -150,8 +221,10 @@ class MainActivity : FragmentActivity() {
 
         // ---- 侧边栏菜单：聚焦缩放 + 点击切换页签 ----
         homeItem.bindSidebarFocusScale()
+        historyItem.bindSidebarFocusScale()
         settingsItem.bindSidebarFocusScale()
         homeItem.setOnClickListener { if (currentTab != TAB_HOME) selectTab(TAB_HOME) }
+        historyItem.setOnClickListener { if (currentTab != TAB_HISTORY) selectTab(TAB_HISTORY) }
         settingsItem.setOnClickListener { if (currentTab != TAB_SETTINGS) selectTab(TAB_SETTINGS) }
 
         // ---- 设置面板：「添加主机」→ 配对引导（2026-11-07 设置页落地） ----
@@ -191,6 +264,21 @@ class MainActivity : FragmentActivity() {
             adapter = hostAdapter
         }
 
+        // ---- 历史网格（5 列，与主页一致）+ 头部「刷新」按钮 ----
+        historyAdapter = HistoryGridAdapter(
+            onClick = { item -> openHistoryItem(item) },
+            onFocus = { item -> onHistoryItemFocused(item) }
+        )
+        historyGrid.apply {
+            layoutManager = GridLayoutManager(this@MainActivity, GRID_SPAN)
+            adapter = historyAdapter
+        }
+        findViewById<TextView>(R.id.btn_history_refresh).apply {
+            bindFocusHighlight()
+            // 刷新：重新拉取所有主机影片状态、重新校验全部历史条目有效性
+            setOnClickListener { loadHistory(manual = true) }
+        }
+
         // ---- 订阅已配对主机流 → 网格与头部实时刷新 ----
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -223,7 +311,11 @@ class MainActivity : FragmentActivity() {
         //      并预置焦点到当前页签菜单（遥控器首按体验） ----
         val initialTab = intent.getIntExtra(EXTRA_OPEN_TAB, TAB_HOME)
         selectTab(initialTab)
-        val initialItem = if (initialTab == TAB_SETTINGS) settingsItem else homeItem
+        val initialItem = when (initialTab) {
+            TAB_SETTINGS -> settingsItem
+            TAB_HISTORY -> historyItem
+            else -> homeItem
+        }
         initialItem.post { initialItem.requestFocus() }
     }
 
@@ -232,17 +324,32 @@ class MainActivity : FragmentActivity() {
     // ==================================================================
 
     /**
-     * 切换页签：菜单选中态（描边胶囊）+ 右侧面板（主页面板 / 设置面板）
+     * 切换页签：菜单选中态（描边胶囊）+ 右侧面板
+     * （主页面板 / 历史面板 / 设置面板，三选一显示）。
      */
     private fun selectTab(tab: Int) {
         currentTab = tab
-        val isHome = tab == TAB_HOME
-        homeItem.isSelected = isHome
-        settingsItem.isSelected = !isHome
-        homePanel.isVisible = isHome
-        devPanel.isVisible = !isHome
-        // 设置面板信息与头部状态栏同源，切到设置页时同步一次
-        if (!isHome) syncSettingsPanel()
+        homeItem.isSelected = tab == TAB_HOME
+        historyItem.isSelected = tab == TAB_HISTORY
+        settingsItem.isSelected = tab == TAB_SETTINGS
+        homePanel.isVisible = tab == TAB_HOME
+        historyPanel.isVisible = tab == TAB_HISTORY
+        devPanel.isVisible = tab == TAB_SETTINGS
+        when (tab) {
+            // 设置面板信息与头部状态栏同源，切到设置页时同步一次
+            TAB_SETTINGS -> syncSettingsPanel()
+            // 进入历史页即执行一轮「影片存在性校验」（需求 3），保证列表始终最新
+            TAB_HISTORY -> loadHistory(manual = false)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从播放页返回且当前停在历史页：静默重载（播放进度可能已推进/新增记录）
+        if (returnFromPlayback) {
+            returnFromPlayback = false
+            if (currentTab == TAB_HISTORY) loadHistory(manual = false)
+        }
     }
 
     // ==================================================================
@@ -259,6 +366,8 @@ class MainActivity : FragmentActivity() {
             withContext(Dispatchers.Main) {
                 networkName = name
                 tvNetwork.text = "当前网络：$name"
+                // 历史页头部「当前网络」与主页同源同步
+                histNetwork.text = "当前网络：$name"
                 syncSettingsPanel()
             }
         }
@@ -381,6 +490,203 @@ class MainActivity : FragmentActivity() {
             }
             refreshing = false
         }
+    }
+
+    // ==================================================================
+    // 历史记录页（2026-11-08 历史功能模块）
+    // ==================================================================
+
+    /**
+     * 加载历史记录（进入历史页 / 手动刷新 / 播放返回共用入口）。
+     *
+     * 流程：遍历全部播放进度记录 → 逐条校验对应影片在「原主机 + 其他已配置
+     * 主机」中是否仍然存在 → 仅保留影片仍存在于可连接主机上的条目 →
+     * 提交网格展示。校验期间顺带获得各主机可达性（头部「连接状态」同源复用）。
+     *
+     * @param manual true = 手动刷新（Toast 反馈过程与结果）；false = 静默加载
+     */
+    private fun loadHistory(manual: Boolean) {
+        if (loadingHistory) return
+        loadingHistory = true
+        if (manual) Toast.makeText(this, "正在刷新历史记录…", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val items = withContext(Dispatchers.IO) { validateHistory() }
+            loadingHistory = false
+            if (isFinishing || isDestroyed) return@launch
+
+            // ---- 提交网格 + 空态切换 ----
+            val gridHadFocus = historyGrid.hasFocus()
+            historyAdapter.submit(items)
+            historyEmpty.isVisible = items.isEmpty()
+
+            // ---- 头部默认展示首条记录所属主机（焦点联动会覆盖） ----
+            val first = items.firstOrNull()
+            histHostName.text = "电脑主机名称：${first?.host?.name ?: "—"}"
+            histConnection.text = "连接状态：${first?.let { statusTextFor(it.host.hostDeviceId) } ?: "未检测"}"
+
+            if (manual) {
+                Toast.makeText(this@MainActivity, "历史记录已刷新（${items.size} 条）", Toast.LENGTH_SHORT).show()
+            }
+
+            // ---- 焦点恢复：数据集变化可能使原聚焦卡片被回收（同浏览页策略） ----
+            if (items.isNotEmpty()) {
+                historyGrid.postDelayed({
+                    val vh = historyGrid.findViewHolderForAdapterPosition(0)
+                    val needFocus = !histFocusDone || (gridHadFocus && !historyGrid.hasFocus())
+                    if (vh != null && needFocus) {
+                        histFocusDone = true
+                        vh.itemView.findViewById<FrameLayout>(R.id.tile).requestFocus()
+                    }
+                }, 200)
+            }
+        }
+    }
+
+    /**
+     * 历史条目校验（IO 线程执行）。
+     *
+     * 校验规则（需求 3）：
+     * 1. 逐台已配置主机拉取授权文件夹列表（兼作可达性探测，401/网络错误 = 不可用）；
+     * 2. 遍历全部播放进度记录，逐条寻找影片：
+     *    - 优先在记录所属的原主机中查找（最常见路径）；
+     *    - 原主机不可达或影片已删除时，继续在其他可连接主机中查找；
+     * 3. 查找方式：按影片文件名在主机各授权文件夹内递归搜索，
+     *    对搜索结果反解 videoId 得 (folderId, 相对路径)，与进度记录的
+     *    videoPath 精确比对——路径一致才算同一影片（同名不同目录不误匹配）；
+     * 4. 找到 → 生成 HistoryItem（重新定位的 videoId 可直接用于缩略图与续播）；
+     *    全部主机都找不到 → 该条目被过滤（对应影片已不存在，需求 3 自动隐藏）。
+     *
+     * 性能设计：主机探测并行；单条记录内部串行（原主机优先的顺序语义），
+     * 多条记录之间并行；同主机同文件名的搜索结果做缓存复用。
+     */
+    private suspend fun validateHistory(): List<HistoryItem> = coroutineScope {
+        val repo = (application as BoxTvApp).repository
+        val hosts = repo.pairedHosts.value
+        val records = repo.getAllProgress()
+        if (hosts.isEmpty() || records.isEmpty()) return@coroutineScope emptyList()
+
+        // ---- 第一步：逐台主机探测可达性 + 拉取授权文件夹（并行） ----
+        // folders() 成功 = 可连接且授权有效（与主页 ping 探测同语义）
+        data class HostState(val host: PairedHost, val reachable: Boolean, val folders: List<Folder>)
+        val hostStates = hosts.map { h ->
+            async {
+                when (val r = repo.folders(h)) {
+                    is ApiResult.Ok -> HostState(h, reachable = true, folders = r.data)
+                    else -> HostState(h, reachable = false, folders = emptyList())
+                }
+            }
+        }.awaitAll()
+        // 可达性写回 onlineStatus：历史页与主页头部「连接状态」共用一份缓存
+        onlineStatus = hostStates.associate { it.host.hostDeviceId to it.reachable }
+        android.util.Log.d(
+            "boxtv-history",
+            "hosts=${hosts.size} reachable=${hostStates.count { it.reachable }} records=${records.size} folders=${hostStates.sumOf { it.folders.size }}"
+        )
+
+        // ---- 第二步：主机内影片定位（按文件名递归搜索 + 相对路径精确匹配） ----
+        // 搜索缓存：(hostDeviceId, 查询词) → 搜索结果，避免同查询词重复请求
+        val searchCache = mutableMapOf<Pair<String, String>, List<VideoEntry>>()
+        suspend fun findOnHost(state: HostState, videoPath: String): VideoEntry? {
+            val segs = videoPath.split('/')
+            // 查询词序列：末段文件名 → 上级目录名兜底。
+            // M3U8 聚合条目（videoPath 以 index.m3u8 结尾）在电脑端按
+            // 聚合条目名（其上级目录名，如 "10.m3u8"）参与搜索匹配，
+            // 直接搜 "index.m3u8" 会落空 → 退而搜索上级目录名。
+            val queries = buildList {
+                add(segs.last())
+                if (segs.size >= 2) add(segs[segs.size - 2])
+            }
+            for (folder in state.folders) {
+                for (query in queries) {
+                    val entries = searchCache.getOrPut(state.host.hostDeviceId to query) {
+                        when (val r = repo.search(state.host, folder.id, query)) {
+                            is ApiResult.Ok -> r.data
+                            else -> emptyList()
+                        }
+                    }
+                    // 反解 videoId 比对相对路径：与进度键（videoPath）完全一致才算命中
+                    entries.firstOrNull { entry ->
+                        !entry.isDir && entry.videoId != null &&
+                            VideoIdCodec.decode(entry.videoId)?.second == videoPath
+                    }?.let { return it }
+                }
+            }
+            return null
+        }
+
+        // ---- 第三步：逐条记录跨主机校验（记录间并行，单条内原主机优先串行） ----
+        records.map { record ->
+            async {
+                val primary = hostStates.firstOrNull {
+                    it.host.hostDeviceId == record.hostDeviceId && it.reachable
+                }
+                // 候选顺序：原主机优先，其余可连接主机兜底（影片被迁移到其他电脑的场景）
+                val candidates = listOfNotNull(primary) +
+                    hostStates.filter { it.reachable && it !== primary }
+                for (state in candidates) {
+                    val entry = findOnHost(state, record.videoPath)
+                    android.util.Log.d(
+                        "boxtv-history",
+                        "record=${record.videoPath} host=${state.host.name} found=${entry?.videoId}"
+                    )
+                    val vid = entry?.videoId ?: continue // 理论不发生（命中即非空），可空性兜底
+                    val percent =
+                        if (record.durationMs > 0)
+                            ((record.positionMs * 100) / record.durationMs).toInt().coerceIn(0, 100)
+                        else 0
+                    return@async HistoryItem(
+                        progress = record,
+                        host = state.host,
+                        videoId = vid,
+                        name = entry.name,
+                        isM3u8 = entry.isM3u8,
+                        percent = percent,
+                        thumbUrl = repo.thumbUrl(state.host, vid),
+                        token = state.host.token
+                    )
+                }
+                null // 所有可连接主机均无此影片 → 隐藏该条目
+            }
+        }.awaitAll().filterNotNull()
+    }
+
+    /** 主机连接状态文案（与主页头部同一套语义，数据来自 validateHistory 的探测结果） */
+    private fun statusTextFor(hostDeviceId: String): String = when {
+        onlineStatus[hostDeviceId] == true -> "正常"
+        onlineStatus[hostDeviceId] == false -> "已断开"
+        loadingHistory -> "检测中…"
+        else -> "未检测"
+    }
+
+    /** 历史卡片聚焦 → 头部「电脑主机名称/连接状态」联动（与主页网格同一交互） */
+    private fun onHistoryItemFocused(item: HistoryItem) {
+        histHostName.text = "电脑主机名称：${item.host.name}"
+        histConnection.text = "连接状态：${statusTextFor(item.host.hostDeviceId)}"
+    }
+
+    /**
+     * 点击历史条目 → 切换到影片所属主机环境直接续播（需求 5）。
+     *
+     * 续播位置策略：
+     * - 影片在原主机上（hostDeviceId 一致）：RESUME_AUTO 交给播放页按本地
+     *   断点自动续播（复用 5%~95% 既有规则，与浏览页点击行为完全一致）；
+     * - 影片在其他主机上被重新定位（跨主机续播）：进度键挂在原主机下，
+     *   播放页按新主机查不到断点 → 显式传入原记录的播放位置。
+     */
+    private fun openHistoryItem(item: HistoryItem) {
+        returnFromPlayback = true
+        val sameHost = item.host.hostDeviceId == item.progress.hostDeviceId
+        startActivity(
+            Intent(this, PlaybackActivity::class.java)
+                .putExtra(PlaybackActivity.EXTRA_HOST_DEVICE_ID, item.host.hostDeviceId)
+                .putExtra(PlaybackActivity.EXTRA_VIDEO_ID, item.videoId)
+                .putExtra(PlaybackActivity.EXTRA_NAME, item.name)
+                .putExtra(PlaybackActivity.EXTRA_IS_M3U8, item.isM3u8)
+                .putExtra(
+                    PlaybackActivity.EXTRA_RESUME_POSITION_MS,
+                    if (sameHost) PlaybackActivity.RESUME_AUTO else item.progress.positionMs
+                )
+        )
     }
 
     // ==================================================================
@@ -737,6 +1043,74 @@ class MainActivity : FragmentActivity() {
         class VH(root: View) : RecyclerView.ViewHolder(root) {
             val tile: FrameLayout = root.findViewById(R.id.tile)
             val name: TextView = root.findViewById(R.id.tv_name)
+        }
+    }
+
+    // ==================================================================
+    // 历史网格适配器（2026-11-08 历史功能模块）：
+    // 缩略图图块 + 「主机名 片名 进度xx%」信息行，样式与主页/浏览页同规范
+    // ==================================================================
+
+    private class HistoryGridAdapter(
+        private val onClick: (HistoryItem) -> Unit,
+        private val onFocus: (HistoryItem) -> Unit
+    ) : RecyclerView.Adapter<HistoryGridAdapter.VH>() {
+
+        private var items: List<HistoryItem> = emptyList()
+
+        fun submit(list: List<HistoryItem>) {
+            items = list
+            notifyDataSetChanged()
+        }
+
+        override fun getItemCount(): Int = items.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+            val root = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_history_card, parent, false)
+            val tile = root.findViewById<FrameLayout>(R.id.tile)
+            // 焦点光标：白环（bg_content_tile 背景 selector）+ 轻微放大；
+            // clipToOutline 让缩略图跟随图块圆角裁切；
+            // 聚焦回调上抛 → 头部「主机名称/连接状态」联动
+            tile.clipToOutline = true
+            tile.bindFocusHighlight(withForeground = false) { v, hasFocus ->
+                if (hasFocus) (v.tag as? HistoryItem)?.let(onFocus)
+            }
+            return VH(root)
+        }
+
+        override fun onBindViewHolder(holder: VH, position: Int) {
+            val item = items[position]
+            // 复用重置：清掉上一个数据残留的放大/抬升状态
+            holder.tile.resetFocusHighlight()
+            // tag 携带当前绑定条目：焦点回调从 tag 取数，避免 position 复用错位
+            holder.tile.tag = item
+            holder.caption.text = item.caption
+            // 第 0 行卡片：上键显式直达历史页头部「刷新」按钮
+            //（不设置时 DPAD_UP 几何焦点搜索可能落回侧边栏，头部按钮不可达）
+            holder.tile.nextFocusUpId =
+                if (position < GRID_SPAN) R.id.btn_history_refresh else View.NO_ID
+            // 缩略图：Glide 异步加载影片所属主机的关键帧
+            // - GlideUrl 携带 X-BoxTV-Token 鉴权头（Token 不落 URL，避免泄露到日志）
+            // - placeholder/error：加载失败降级占位图（与浏览页同一策略）
+            // - RecyclerView 复用时 into() 自动取消上一次请求，无需手动管理
+            val glideUrl = GlideUrl(
+                item.thumbUrl,
+                LazyHeaders.Builder().addHeader("X-BoxTV-Token", item.token).build()
+            )
+            Glide.with(holder.tile)
+                .load(glideUrl)
+                .placeholder(R.drawable.movie)
+                .error(R.drawable.movie)
+                .centerCrop()
+                .into(holder.thumb)
+            holder.tile.setOnClickListener { onClick(item) }
+        }
+
+        class VH(root: View) : RecyclerView.ViewHolder(root) {
+            val tile: FrameLayout = root.findViewById(R.id.tile)
+            val thumb: ImageView = root.findViewById(R.id.iv_thumb)
+            val caption: TextView = root.findViewById(R.id.tv_caption)
         }
     }
 }

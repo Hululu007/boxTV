@@ -153,6 +153,128 @@
             </FrameLayout>
         </LinearLayout>
 
+        <!-- ~~~~~~~~~~~~ 历史记录面板（2026-11-08 历史功能，参照设计稿） ~~~~~~~~~~~~
+             结构与主页面板完全同框架：头部状态栏（网络/主机名/连接状态 + 刷新）
+             + 「历史记录」分区标题 + 内容网格。
+             - 网格展示校验有效的播放历史卡片（缩略图 + 「主机名 片名 进度xx%」）；
+             - 刷新按钮：重新拉取各主机影片状态、重新校验全部历史条目有效性；
+             - TV 适配要点与主页一致：网格 focusable=false、clipToPadding=false。 -->
+        <LinearLayout
+            android:id="@+id/history_panel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <!-- 头部状态栏：布局/间距与主页面板头部逐项一致 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="6dp">
+
+                <!-- 当前网络名称（与主页同源数据，切到历史页时同步） -->
+                <TextView
+                    android:id="@+id/hist_network"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1.1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="当前网络：检测中…"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
+                <!-- 电脑主机名称（跟随历史卡片焦点联动，默认取首条记录所属主机） -->
+                <TextView
+                    android:id="@+id/hist_host_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1.2"
+                    android:ellipsize="end"
+                    android:layout_marginStart="8dp"
+                    android:maxLines="1"
+                    android:text="电脑主机名称：—"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
+                <!-- 连接状态（聚焦主机可达性：校验过程即完成 ping 语义的探测） -->
+                <TextView
+                    android:id="@+id/hist_connection"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:layout_marginStart="8dp"
+                    android:maxLines="1"
+                    android:text="连接状态：未检测"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
+                <!-- 刷新按钮：重新校验全部历史条目并刷新列表（样式同头部刷新胶囊） -->
+                <TextView
+                    android:id="@+id/btn_history_refresh"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:background="@drawable/bg_header_button"
+                    android:focusable="true"
+                    android:paddingHorizontal="24dp"
+                    android:paddingVertical="7dp"
+                    android:text="刷新"
+                    android:textColor="#1B1B1B"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <!-- 分区标题（参照设计稿「历 史 记 录」，样式同主页「我的主机」） -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="20dp"
+                android:paddingTop="6dp"
+                android:text="历史记录"
+                android:textColor="@color/text_secondary"
+                android:textSize="15sp" />
+
+            <!-- 内容区：历史网格 + 空态提示（叠加显示） -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <!-- 播放历史网格（5 列，与主页/浏览页一致；焦点光标见 FocusHighlight） -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/history_grid"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:focusable="false"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="12dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="16dp"
+                    android:scrollbars="none" />
+
+                <!-- 空态：无有效播放历史（纯提示，不参与焦点） -->
+                <TextView
+                    android:id="@+id/history_empty"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:paddingHorizontal="32dp"
+                    android:paddingVertical="18dp"
+                    android:text="暂无播放历史\n播放过的影片会显示在这里"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="17sp"
+                    android:visibility="gone" />
+            </FrameLayout>
+        </LinearLayout>
+
         <!-- ~~~~~~~~~~~~ 设置面板（参照设计稿二） ~~~~~~~~~~~~ -->
         <LinearLayout
             android:id="@+id/dev_panel"

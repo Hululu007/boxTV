@@ -175,6 +175,9 @@ class PlaybackActivity : FragmentActivity() {
     private var mediaDurationMs = 0L     // 原片时长（meta 补偿；转码流本身无时长）
     private var meta: VideoMeta? = null  // 当前视频元数据（时长/源片分辨率）
 
+    /** 最近一次装载的流地址（2026-11-09 40400 诊断埋点：播放器报错时输出，便于回溯失败请求） */
+    private var lastStreamUrl: String = ""
+
     // ---- 选集状态 ----
     private var episodes: List<VideoEntry> = emptyList()
     private var episodesKey: String? = null   // 已加载列表的「folderId|父路径」标记（换视频失效）
@@ -506,6 +509,7 @@ class PlaybackActivity : FragmentActivity() {
     /** 应用媒体源：直连 = MediaItem + 断点位置；转码 = Clipping 裁剪窗口 + 0 点起播 */
     private fun applySource(transcode: Boolean, item: MediaItem, startPos: Long) {
         val factory = mediaSourceFactory ?: return
+        lastStreamUrl = item.localConfiguration?.uri?.toString() ?: "" // 错误诊断埋点
         transcoded = transcode
         streamStartMs = if (transcode && startPos > 0) startPos else 0L
         if (transcode) {
@@ -643,7 +647,26 @@ class PlaybackActivity : FragmentActivity() {
 
     private val playerListener = object : Player.Listener {
         override fun onPlayerError(error: PlaybackException) {
-            android.util.Log.d("boxtv-playback", "player error: ${error.errorCodeName}", error)
+            // 2026-11-09 40400 诊断埋点：完整记录错误码 / 原因链 / 当前流地址 / 播放位置。
+            // ExoPlayer 的异常原因可能多层嵌套（HTTP 状态码层 → 解封装层），
+            // HTTP 404（电脑端业务码 40400）与文件占用等场景的差异都在 cause 链里，
+            // 如 InvalidResponseCodeException.statusCode、FileNotFound 之类。
+            val causeChain = buildString {
+                var c: Throwable? = error.cause
+                var depth = 0
+                while (c != null && depth < 6) {
+                    append("\n  cause[$depth] ${c.javaClass.name}: ${c.message}")
+                    c = c.cause
+                    depth++
+                }
+            }
+            android.util.Log.w(
+                "boxtv-playback",
+                "player error: ${error.errorCodeName} (code=${error.errorCode}) " +
+                    "pos=${realPosition()}ms m3u8=$isM3u8 transcoded=$transcoded\n" +
+                    "  url=$lastStreamUrl$causeChain",
+                error
+            )
             val hint = if (transcoded) "，可尝试切换 1080P（原画）" else ""
             Toast.makeText(
                 this@PlaybackActivity,

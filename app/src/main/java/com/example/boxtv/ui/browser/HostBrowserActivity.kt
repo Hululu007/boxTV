@@ -88,6 +88,15 @@ class HostBrowserActivity : FragmentActivity() {
     /** 搜索关键字（非空 = 搜索结果展示中，返回键先退出搜索） */
     private var searchKeyword: String? = null
 
+    // ---- 2026-11-11 40400「目录重复入栈」修复 ----
+    // 日志定位：404 请求的 path 均为 X/X 形式（同名目录段重复），系遥控器 OK
+    // 连按/按键重复在异步加载完成前再次触发同一卡片点击所致（详见 enterFolder 注释）
+    /** 目录内容加载进行中标记：加载未完成前忽略网格文件夹点击（防重复入栈） */
+    private var loadingEntries = false
+
+    /** 404 自愈回退标记：一次连续加载链路中最多自愈一次，防止反复回退清空导航栈 */
+    private var selfHealRetried = false
+
     // ---- 排序（2026-11-07 用户需求：头部「排序」按钮 + 下拉框选择排序方式） ----
 
     /**
@@ -146,9 +155,20 @@ class HostBrowserActivity : FragmentActivity() {
         // ---- 侧边栏：聚焦动效 + 页面跳转（浏览页属于「主页」分区） ----
         sidebarHome.bindSidebarFocusScale()
         sidebarSettings.bindSidebarFocusScale()
+        // 历史菜单（2026-11-08 历史记录页入口，与设置菜单同一跳转模式）
+        val sidebarHistory = findViewById<TextView>(R.id.sidebar_history)
+        sidebarHistory.bindSidebarFocusScale()
         sidebarHome.isSelected = true
         // 主页菜单 → 返回主页（浏览页本身在主页分区，OK 即返回）
         sidebarHome.setOnClickListener { finish() }
+        // 历史菜单 → 跳主页并打开历史记录页（历史面板在主页 Activity 中）
+        sidebarHistory.setOnClickListener {
+            startActivity(
+                Intent(this, MainActivity::class.java)
+                    .putExtra(MainActivity.EXTRA_OPEN_TAB, MainActivity.TAB_HISTORY)
+            )
+            finish()
+        }
         // 设置菜单 → 返回主页并打开设置页（设置内容在主页的设置面板中）
         sidebarSettings.setOnClickListener {
             startActivity(
@@ -266,6 +286,14 @@ class HostBrowserActivity : FragmentActivity() {
 
     /** 进入文件夹：根目录图块 → 进入对应授权文件夹；网格内文件夹 → 压入路径栈 */
     private fun enterFolder(entry: VideoEntry) {
+        // 2026-11-11 防重入修复（40400 根因）：点击文件夹后 loadEntries 异步执行，
+        // 期间网格仍显示上一级列表且焦点停在原卡片；遥控器 OK 连按/按键重复会
+        // 再次触发同一卡片点击，把同名目录重复压栈 → path 变成 X/X →
+        // 电脑端 404「目录不存在」（40400）。因此：
+        // 1) 加载进行中直接忽略本次点击；
+        // 2) 相邻同名段去重兜底（异常残留的重复段不再叠加）。
+        if (loadingEntries) return
+        if (pathStack.lastOrNull() == entry.name) return
         if (selectedFolderId == null) {
             // 根目录的授权文件夹图块：videoId 携带文件夹 id
             selectedFolderId = entry.videoId
@@ -273,6 +301,8 @@ class HostBrowserActivity : FragmentActivity() {
         } else {
             pathStack.addLast(entry.name)
         }
+        // 置加载标记：由 loadEntries 的三个结果分支（Ok/ApiError/NetworkError）复位
+        loadingEntries = true
         loadEntries()
     }
 
@@ -395,6 +425,9 @@ class HostBrowserActivity : FragmentActivity() {
             if (isFinishing || isDestroyed) return@launch // 页面已销毁才中止（注意方向不能写反）
             when (result) {
                 is ApiResult.Ok -> withContext(Dispatchers.Main) {
+                    // 加载结束：复位防重入标记与自愈标记（成功路径恢复正常导航）
+                    loadingEntries = false
+                    selfHealRetried = false
                     // 先记录提交前网格是否持有焦点（notifyDataSetChanged 的焦点清理
                     // 发生在随后的布局 pass，同步检查会误判为"网格仍持有焦点"）
                     val gridHadFocus = contentGrid.hasFocus()
@@ -435,8 +468,26 @@ class HostBrowserActivity : FragmentActivity() {
                         breadcrumb.text = buildBreadcrumb() + "　" + hint
                     }
                 }
-                is ApiResult.ApiError -> withContext(Dispatchers.Main) { handleError(result) }
+                is ApiResult.ApiError -> withContext(Dispatchers.Main) {
+                    // 加载结束：复位防重入标记
+                    loadingEntries = false
+                    // 2026-11-11 404 自愈（40400 修复配套）：浏览「目录不存在」时，
+                    // 目录栈可能残留无效段（历史缺陷叠加/电脑端目录被删除）。
+                    // 自动回退一层并重载一次（面包屑仍提示错误，用户可感知）；
+                    // 仍失败则按普通错误兜底。搜索结果不参与自愈（无路径栈语义）。
+                    if (result.code == 40400 && keyword == null && folderId != null &&
+                        pathStack.isNotEmpty() && !selfHealRetried
+                    ) {
+                        selfHealRetried = true
+                        pathStack.removeLast()
+                        loadEntries()
+                    } else {
+                        handleError(result)
+                    }
+                }
                 is ApiResult.NetworkError -> withContext(Dispatchers.Main) {
+                    // 加载结束：复位防重入标记
+                    loadingEntries = false
                     contentAdapter.submit(emptyList())
                     breadcrumb.text = "网络错误：${result.reason}"
                 }

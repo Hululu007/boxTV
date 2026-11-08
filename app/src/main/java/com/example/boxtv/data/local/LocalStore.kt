@@ -150,6 +150,15 @@ class LocalStore(context: Context) {
         }
     }
 
+    /**
+     * 读取全部播放记录快照（2026-11-08 历史记录页新增）。
+     * 返回按记录时间从新到旧排序的列表副本，供历史页遍历校验使用；
+     * 不对外发流——历史页采用「进入页面 / 手动刷新」时按需拉取的模式，
+     * 避免播放中每 5 秒落盘触发历史页无意义的重载。
+     */
+    fun getAllProgress(): List<PlaybackProgress> =
+        data.progress.sortedByDescending { it.updatedAt }
+
     /** 调用方必须已持有 [mutex]；原子写盘 */
     private fun saveLocked() {
         val tmp = File(file.parentFile, file.name + ".tmp")

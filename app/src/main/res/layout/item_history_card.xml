@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    历史记录卡片（2026-11-08 历史记录页，参照设计稿）：视频缩略图图块 + 信息行
+    - 图块：圆角浅灰底（bg_content_tile，聚焦态自带白色光标环），
+      tile 设置 clipToOutline 后缩略图跟随图块圆角裁切；
+    - iv_thumb：影片缩略图（Glide 加载电脑端关键帧，铺满图块 centerCrop）；
+    - 信息行：图块下方左对齐白字单行省略，格式与设计稿一致——
+      「主机名 片名 进度xx%」（空格分隔）。
+    焦点光标（白描边 + 轻微放大）与主页/浏览页网格同一套方案
+    （背景 selector 光标环 + FocusHighlight 缩放）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="14dp"
+    android:layout_marginBottom="18dp"
+    android:orientation="vertical">
+
+    <!-- 缩略图图块（焦点落点：可聚焦 + 点击事件绑定在此） -->
+    <FrameLayout
+        android:id="@+id/tile"
+        android:layout_width="match_parent"
+        android:layout_height="92dp"
+        android:background="@drawable/bg_content_tile"
+        android:focusable="true">
+
+        <!-- 影片缩略图（铺满图块） -->
+        <ImageView
+            android:id="@+id/iv_thumb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="影片缩略图"
+            android:scaleType="centerCrop" />
+    </FrameLayout>
+
+    <!-- 信息行：主机名 片名 进度xx%（左对齐，与设计稿一致） -->
+    <TextView
+        android:id="@+id/tv_caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+</LinearLayout>

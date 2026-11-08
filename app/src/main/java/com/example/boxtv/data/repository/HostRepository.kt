@@ -159,4 +159,7 @@ class HostRepository(
     /** 查询播放进度 */
     fun getProgress(host: PairedHost, videoPath: String): PlaybackProgress? =
         store.getProgress(host.hostDeviceId, videoPath)
+
+    /** 读取全部播放记录（按记录时间从新到旧排序；2026-11-08 历史记录页使用） */
+    fun getAllProgress(): List<PlaybackProgress> = store.getAllProgress()
 }

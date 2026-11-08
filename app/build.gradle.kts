@@ -1,4 +1,4 @@
-import java.util.Properties
+﻿﻿import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -21,8 +21,8 @@ android {
         applicationId = "com.example.boxtv"
         minSdk = 29
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.3.8" // 2026-11-08 播放控制栏新增「菜单」按钮（设置左侧，OK 键呼出侧边菜单面板，等效遥控器菜单键）
+        versionCode = 15
+        versionName = "1.3.11" // 2026-11-11 40400 路径重复入栈修复：浏览页防重入 + 404 自愈回退
 
     }
 

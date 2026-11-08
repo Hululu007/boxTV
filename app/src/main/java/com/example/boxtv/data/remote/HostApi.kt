@@ -255,14 +255,19 @@ class HostApi {
     // 内部：统一请求与信封解析
     // ------------------------------------------------------------------
 
-    /** GET 请求（单对象响应）：信封 → data 解码为 T */
+    /** GET 请求（单对象响应）：信封 → data 解码为 T。
+     *  2026-11-09 埋点：业务错误（含 40400）与网络异常统一落 logcat（tag: boxtv-api），
+     *  偶现问题可通过 adb logcat 直接回溯失败接口与错误码。 */
     private suspend inline fun <reified T : Any> execute(url: String, token: String?): ApiResult<T> =
         runCatching {
             val envelope = client.get(url) {
                 token?.let { header("X-BoxTV-Token", it) }
             }.body<ApiEnvelope>()
-            envelope.toResult { json.decodeFromJsonElement<T>(it) }
-        }.getOrElse { ApiResult.NetworkError(it.message ?: "网络请求失败") }
+            logIfApiError(url, envelope.toResult { json.decodeFromJsonElement<T>(it) })
+        }.getOrElse {
+            android.util.Log.w("boxtv-api", "网络异常 $url: ${it.javaClass.simpleName}: ${it.message}")
+            ApiResult.NetworkError(it.message ?: "网络请求失败")
+        }
 
     /** POST 请求（单对象响应）：请求体 JSON 序列化 + 信封解析 */
     private suspend inline fun <reified T : Any> postRequest(url: String, body: Any): ApiResult<T> =
@@ -271,8 +276,11 @@ class HostApi {
                 contentType(ContentType.Application.Json)
                 setBody(body)
             }.body<ApiEnvelope>()
-            envelope.toResult { json.decodeFromJsonElement<T>(it) }
-        }.getOrElse { ApiResult.NetworkError(it.message ?: "网络请求失败") }
+            logIfApiError(url, envelope.toResult { json.decodeFromJsonElement<T>(it) })
+        }.getOrElse {
+            android.util.Log.w("boxtv-api", "网络异常 $url: ${it.javaClass.simpleName}: ${it.message}")
+            ApiResult.NetworkError(it.message ?: "网络请求失败")
+        }
 
     /** GET 请求（单对象响应）：信封 → data 解码为 D */
     private suspend inline fun <reified D : Any> getListRequest(url: String, token: String): ApiResult<D> =
@@ -280,8 +288,19 @@ class HostApi {
             val envelope = client.get(url) {
                 header("X-BoxTV-Token", token)
             }.body<ApiEnvelope>()
-            envelope.toResult { json.decodeFromJsonElement<D>(it) }
-        }.getOrElse { ApiResult.NetworkError(it.message ?: "网络请求失败") }
+            logIfApiError(url, envelope.toResult { json.decodeFromJsonElement<D>(it) })
+        }.getOrElse {
+            android.util.Log.w("boxtv-api", "网络异常 $url: ${it.javaClass.simpleName}: ${it.message}")
+            ApiResult.NetworkError(it.message ?: "网络请求失败")
+        }
+
+    /** 业务错误统一埋点：40400/40100 等错误码 + 完整 URL 落 logcat，成功静默 */
+    private fun <T> logIfApiError(url: String, result: ApiResult<T>): ApiResult<T> {
+        if (result is ApiResult.ApiError) {
+            android.util.Log.w("boxtv-api", "接口错误 $url -> code=${result.code} message=${result.message}")
+        }
+        return result
+    }
 
     /** EntriesData 响应 → 领域模型列表（错误码原样透传） */
     private fun mapEntries(r: ApiResult<EntriesData>): ApiResult<List<VideoEntry>> = when (r) {
