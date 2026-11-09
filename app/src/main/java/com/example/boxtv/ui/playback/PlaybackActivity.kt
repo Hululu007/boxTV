@@ -115,6 +115,9 @@ class PlaybackActivity : FragmentActivity() {
         /** 音量增益档位持久化（2026-11-07 播放体验专项） */
         private const val KEY_GAIN = "volume_gain"
 
+        /** 自动连播开关（SharedPreferences 键；2026-11-09 新增，默认开启） */
+        private const val KEY_AUTO_PLAY_NEXT = "auto_play_next"
+
         /** 增益步长（百分比）：−/＋ 按钮每次调整 10%（0-200%，2026-11-08 交互改版） */
         private const val GAIN_STEP = 10
 
@@ -154,10 +157,14 @@ class PlaybackActivity : FragmentActivity() {
     private lateinit var gainButton: TextView
     private var gainPercent = 100
 
+    // ---- 自动连播（2026-11-09 新增，默认开启）----
+    private lateinit var autoplayButton: TextView
+    private var autoPlayNext = true
+
     // ---- 遥控器长按快进/快退状态 ----
     private lateinit var seekFeedback: TextView
     private var lastSeekStepMs = 0L           // 上次步进时刻（重复事件节流用）
-    private var pendingTranscodeOffsetMs = 0L // 转码模式长按累计偏移（松开按键时一次性提交）
+    private var pendingSeekOffsetMs = 0L // 长按快进/快退累计偏移（松开按键时一次性提交；2026-11-09 W8 起直连/转码共用）
     private val hideSeekFeedback = Runnable { seekFeedback.isVisible = false }
 
     /** HTTP 数据源工厂（Token 头 + 超时，直连/转码共用） */
@@ -214,6 +221,13 @@ class PlaybackActivity : FragmentActivity() {
         playerView = findViewById(R.id.player_view)
         seekFeedback = findViewById(R.id.seek_feedback)
 
+        // 2026-11-09 审查 S1 修复：播放期间保持屏幕常亮。
+        // 电视端遥控器长时间无操作时，系统屏保/无操作休眠会关屏中断播放
+        // （各品牌触发策略不同，低端机起播慢时更易触发）。播放页作为全屏
+        // 播放器必须设置 keepScreenOn；页面退出时随 Activity 销毁自动失效，
+        // 无需手动还原。
+        playerView.keepScreenOn = true
+
         // 控制条「菜单」按钮（2026-11-08 控制栏交互优化，位于设置按钮左侧）：
         // 遥控器 OK 键点击与原生「菜单」键完全等效，呼出/关闭侧边菜单面板，
         // 为遥控器菜单键失效的用户提供替代入口；按钮聚焦样式见 bg_exo_menu_btn
@@ -227,14 +241,19 @@ class PlaybackActivity : FragmentActivity() {
         val nameArg = intent.getStringExtra(EXTRA_NAME) ?: ""
         val resumeExtra = intent.getLongExtra(EXTRA_RESUME_POSITION_MS, RESUME_AUTO)
         val m3u8Arg = intent.getBooleanExtra(EXTRA_IS_M3U8, false) // M3U8 聚合条目标记
-        android.util.Log.d(
-            "boxtv-playback",
-            "onCreate: hostId=$hostId videoId=$videoIdArg resume=$resumeExtra m3u8=$m3u8Arg"
-        )
+        // W5 修复：videoId 含影片相对路径，属用户观影信息，仅 debug 包输出
+        if (com.example.boxtv.BuildConfig.DEBUG) {
+            android.util.Log.d(
+                "boxtv-playback",
+                "onCreate: hostId=$hostId videoId=$videoIdArg resume=$resumeExtra m3u8=$m3u8Arg"
+            )
+        }
 
         val found = repository.pairedHosts.value.firstOrNull { it.hostDeviceId == hostId }
         if (hostId == null || found == null || videoIdArg.isBlank()) {
-            android.util.Log.d("boxtv-playback", "finish: missing info (hostId=$hostId found=${found != null} videoIdBlank=${videoIdArg.isBlank()})")
+            if (com.example.boxtv.BuildConfig.DEBUG) {
+                android.util.Log.d("boxtv-playback", "finish: missing info (hostId=$hostId found=${found != null} videoIdBlank=${videoIdArg.isBlank()})")
+            }
             Toast.makeText(this, "播放信息缺失", Toast.LENGTH_LONG).show()
             finish()
             return
@@ -252,6 +271,9 @@ class PlaybackActivity : FragmentActivity() {
 
         // ---- 音量增益：读取上次设置的档位（0-200%，默认 100% 不增益），下次启动自动生效 ----
         gainPercent = prefs?.getInt(KEY_GAIN, 100)?.coerceIn(0, 200) ?: 100
+
+        // ---- 自动连播：读取开关状态（默认开启，2026-11-09 新增）----
+        autoPlayNext = prefs?.getBoolean(KEY_AUTO_PLAY_NEXT, true) ?: true
 
         // ---- 构建 ExoPlayer（HTTP 数据源携带 Token，细则 5.4）----
         dataSourceFactory = DefaultHttpDataSource.Factory()
@@ -354,7 +376,7 @@ class PlaybackActivity : FragmentActivity() {
         return false
     }
 
-    /** 左/右方向键处理：按下时节流步进，抬起时提交转码模式累计的偏移 */
+    /** 左/右方向键处理：按下时节流步进，抬起时一次性提交累计的偏移 */
     private fun handleSeekKeyEvent(event: KeyEvent, forward: Boolean): Boolean {
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
@@ -367,11 +389,23 @@ class PlaybackActivity : FragmentActivity() {
                 }
             }
             KeyEvent.ACTION_UP -> {
-                // 松开按键：转码模式把长按累计的偏移一次性提交（换起点重新起播）
-                if (transcoded && pendingTranscodeOffsetMs != 0L) {
-                    val target = realPosition() + pendingTranscodeOffsetMs
-                    pendingTranscodeOffsetMs = 0
-                    restartTranscodeAt(target)
+                // 松开按键：把长按累计的偏移一次性提交。
+                // 2026-11-09 审查 W8 修复：直连流也改为「预览 + 松手提交」模型——
+                // 此前直连流长按时每 220ms 执行一次真实 seekTo，每次 seek 都会
+                // 打断当前 Range 缓冲重新发请求，低端电视表现为画面反复卡住；
+                // 转码流原本就是该模型，现统一（长按期间只更新气泡预览目标位置）。
+                val offset = pendingSeekOffsetMs
+                if (offset != 0L) {
+                    pendingSeekOffsetMs = 0
+                    if (transcoded) {
+                        // 转码流无法 Range 拖动：以新起点重新起播
+                        restartTranscodeAt(realPosition() + offset)
+                    } else {
+                        // 直连流：一次 seek 到目标位置（duration 未知时由播放器自行截断）
+                        val duration = if (::player.isInitialized) player.duration else C.TIME_UNSET
+                        val maxPos = if (duration != C.TIME_UNSET) duration else Long.MAX_VALUE
+                        player.seekTo((player.currentPosition + offset).coerceIn(0L, maxPos))
+                    }
                 }
             }
         }
@@ -379,17 +413,12 @@ class PlaybackActivity : FragmentActivity() {
         return true
     }
 
-    /** 步进 10 秒：直连流直接 seek（Range 可拖动）；转码流只累计偏移并预览目标位置 */
+    /** 步进 10 秒：直连/转码统一为「累计偏移 + 气泡预览目标位置」，松手时一次性提交 */
     private fun stepSeek(forward: Boolean) {
-        if (transcoded) {
-            pendingTranscodeOffsetMs += if (forward) SEEK_STEP_MS else -SEEK_STEP_MS
-            showSeekFeedback(realPosition() + pendingTranscodeOffsetMs, forward)
-        } else {
-            val delta = if (forward) SEEK_STEP_MS else -SEEK_STEP_MS
-            val target = (player.currentPosition + delta).coerceAtLeast(0)
-            player.seekTo(target)
-            showSeekFeedback(target, forward)
-        }
+        pendingSeekOffsetMs += if (forward) SEEK_STEP_MS else -SEEK_STEP_MS
+        // 预览基准：转码流用真实片源位置（= 流起点 + 播放位置），直连流用当前播放位置
+        val base = if (transcoded) realPosition() else player.currentPosition
+        showSeekFeedback(base + pendingSeekOffsetMs, forward)
     }
 
     /** 快进/快退反馈气泡：显示目标位置，超时自动隐藏 */
@@ -511,6 +540,9 @@ class PlaybackActivity : FragmentActivity() {
         val factory = mediaSourceFactory ?: return
         lastStreamUrl = item.localConfiguration?.uri?.toString() ?: "" // 错误诊断埋点
         transcoded = transcode
+        // W8 配套：换源（起播/拖动/切清晰度）后旧的长按累计偏移已失效，
+        // 必须清零，防止残留偏移在下次松手时被提交到新流上造成错位跳转
+        pendingSeekOffsetMs = 0
         streamStartMs = if (transcode && startPos > 0) startPos else 0L
         if (transcode) {
             val base = factory.createMediaSource(item)
@@ -691,6 +723,9 @@ class PlaybackActivity : FragmentActivity() {
                     statusText.isVisible = false
                     // 播放自然结束：清理进度，下次不续播（细则 5.3 清理规则）
                     clearProgress()
+                    // 自动连播（2026-11-09 新增）：播完自动切到同文件夹下一个视频；
+                    // 开关关闭或已是最后一个视频时保持原有结束行为（停留当前页）
+                    playNextEpisode()
                 }
             }
             refreshMenuInfo()
@@ -713,7 +748,9 @@ class PlaybackActivity : FragmentActivity() {
             durationMs = duration,
             updatedAt = System.currentTimeMillis()
         )
-        android.util.Log.d("boxtv-playback", "save progress: ${progress.positionMs}/${progress.durationMs}")
+        if (com.example.boxtv.BuildConfig.DEBUG) { // W5 修复：仅 debug 包输出
+            android.util.Log.d("boxtv-playback", "save progress: ${progress.positionMs}/${progress.durationMs}")
+        }
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             (application as BoxTvApp).repository.saveProgress(progress)
         }
@@ -755,6 +792,9 @@ class PlaybackActivity : FragmentActivity() {
         gainButton = findViewById(R.id.btn_gain)
         findViewById<TextView>(R.id.btn_gain_minus).setOnClickListener { adjustGain(-GAIN_STEP) }
         findViewById<TextView>(R.id.btn_gain_plus).setOnClickListener { adjustGain(GAIN_STEP) }
+        // 自动连播开关（2026-11-09 新增）：点击切换，即时持久化全局生效
+        autoplayButton = findViewById(R.id.btn_autoplay_next)
+        autoplayButton.setOnClickListener { toggleAutoPlayNext() }
     }
 
     /** 展开菜单面板：焦点落到当前清晰度档位，启动 1 秒信息刷新 */
@@ -764,6 +804,7 @@ class PlaybackActivity : FragmentActivity() {
         playerView.hideController() // 隐藏控制条，避免两套 UI 抢焦点
         refreshQualityButtons()
         refreshGainButton()
+        refreshAutoPlayButton()
         ensureEpisodesLoaded()
         refreshMenuInfo()
         qualityButtons[quality]?.post { qualityButtons[quality]?.requestFocus() }
@@ -827,6 +868,24 @@ class PlaybackActivity : FragmentActivity() {
         gainButton.text = gainLabel(gainPercent)
     }
 
+    /** 切换自动连播开关：即时持久化（SharedPreferences），全局生效（2026-11-09 新增） */
+    private fun toggleAutoPlayNext() {
+        autoPlayNext = !autoPlayNext
+        prefs?.edit()?.putBoolean(KEY_AUTO_PLAY_NEXT, autoPlayNext)?.apply()
+        refreshAutoPlayButton()
+        Toast.makeText(
+            this,
+            if (autoPlayNext) "自动连播已开启" else "自动连播已关闭",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    /** 刷新自动连播按钮文案与选中态（面板展开时同步当前状态） */
+    private fun refreshAutoPlayButton() {
+        autoplayButton.text = if (autoPlayNext) "自动连播：开" else "自动连播：关"
+        autoplayButton.isSelected = autoPlayNext
+    }
+
     /** 刷新面板播放信息（展开期间由 menuInfoTicker 每秒调用） */
     private fun refreshMenuInfo() {
         if (!menuVisible) return
@@ -864,13 +923,17 @@ class PlaybackActivity : FragmentActivity() {
         else -> q
     }
 
-    /** 毫秒 → h:mm:ss / mm:ss */
+    /** 毫秒 → h:mm:ss / mm:ss（Locale.US：区域无关的西文数字，部分区域固件
+     *  默认区域会产生本地化数字/分隔符，破坏进度条等宽对齐——W9 同源加固） */
     private fun formatMs(ms: Long): String {
         val totalSec = ms / 1000
         val h = totalSec / 3600
         val m = (totalSec % 3600) / 60
         val s = totalSec % 60
-        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+        return if (h > 0)
+            "%d:%02d:%02d".format(java.util.Locale.US, h, m, s)
+        else
+            "%02d:%02d".format(java.util.Locale.US, m, s)
     }
 
     // ------------------------------------------------------------------
@@ -878,14 +941,19 @@ class PlaybackActivity : FragmentActivity() {
     // ------------------------------------------------------------------
 
     /**
-     * 按需加载选集列表（面板展开时调用）。
+     * 按需加载选集列表（面板展开 / 自动连播时调用）。
      * 当前文件夹信息直接从 videoId 反解（Base64URL("folderId|相对路径")），
      * 无需浏览页额外传参；同一文件夹的结果在会话内缓存。
+     * @param onLoaded 列表就绪回调（主线程；已缓存时同步回调）——
+     *        自动连播复用：拿到同文件夹列表后取当前视频的下一项
      */
-    private fun ensureEpisodesLoaded() {
+    private fun ensureEpisodesLoaded(onLoaded: ((List<VideoEntry>) -> Unit)? = null) {
         val decoded = VideoIdCodec.decode(videoId) ?: return
         val key = "${decoded.first}|${decoded.second.substringBeforeLast('/', "")}"
-        if (key == episodesKey) return
+        if (key == episodesKey) {
+            onLoaded?.invoke(episodes) // 已缓存：直接以当前列表回调
+            return
+        }
         episodesKey = key
         episodeEmpty.isVisible = false
         val h = host ?: return
@@ -902,6 +970,7 @@ class PlaybackActivity : FragmentActivity() {
                 episodes = list
                 episodeAdapter.notifyDataSetChanged()
                 episodeEmpty.isVisible = list.isEmpty()
+                onLoaded?.invoke(list)
             }
         }
     }
@@ -914,6 +983,26 @@ class PlaybackActivity : FragmentActivity() {
         if (vid == videoId) return
         saveProgressNow()
         loadAndPlay(vid, entry.name, RESUME_AUTO, entry.isM3u8)
+    }
+
+    /**
+     * 自动连播（2026-11-09 新增，默认开启）：播放自然结束后自动切换到
+     * 同文件夹排序的下一个视频——选集列表与浏览页同源同序（自然排序），
+     * M3U8 聚合条目与普通视频混排同样适用。
+     * 无缝直接切换（toast 提示下一片名）；无下一集（最后一条）或列表中
+     * 找不到当前视频时保持原有结束行为。开关在菜单面板「播放设置」切换，
+     * SharedPreferences 持久化全局生效。
+     */
+    private fun playNextEpisode() {
+        if (!autoPlayNext) return
+        ensureEpisodesLoaded { list ->
+            val idx = list.indexOfFirst { it.videoId == videoId }
+            val next = if (idx >= 0) list.getOrNull(idx + 1) else null
+            val nextId = next?.videoId ?: return@ensureEpisodesLoaded // 已是最后一个：不切
+            Toast.makeText(this, "连播：${next.name}", Toast.LENGTH_LONG).show()
+            // 与选集点击同一入口（自然结束的进度已由 clearProgress 清零）
+            loadAndPlay(nextId, next.name, RESUME_AUTO, next.isM3u8)
+        }
     }
 
     /** 选集列表适配器：当前播放项加 ▶ 前缀并提亮 */

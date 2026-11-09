@@ -1,4 +1,4 @@
-﻿﻿import java.util.Properties
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -21,8 +21,8 @@ android {
         applicationId = "com.example.boxtv"
         minSdk = 29
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.3.11" // 2026-11-11 40400 路径重复入栈修复：浏览页防重入 + 404 自愈回退
+        versionCode = 18
+        versionName = "1.3.14" // 2026-11-09 新功能：自动连播（默认开启）——播完自动播同文件夹下一个视频/下一集，播放页菜单「播放设置」可关闭
 
     }
 
@@ -51,6 +51,11 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+    // 2026-11-09 审查 W5 修复配套：启用 BuildConfig 生成（AGP 8 默认关闭），
+    // 供 debug 日志用 BuildConfig.DEBUG 门控（release 包不输出观影路径等隐私日志）
+    buildFeatures {
+        buildConfig = true
     }
 }
 

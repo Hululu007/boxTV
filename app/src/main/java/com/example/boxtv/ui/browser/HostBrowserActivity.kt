@@ -30,6 +30,7 @@ import com.example.boxtv.ui.common.bindSidebarFocusScale
 import com.example.boxtv.ui.common.resetFocusHighlight
 import com.example.boxtv.ui.main.MainActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
@@ -58,6 +59,13 @@ class HostBrowserActivity : FragmentActivity() {
 
         /** 网格列数（参照设计稿，与主页一致） */
         private const val GRID_SPAN = 5
+
+        // ---- 2026-11-09 审查 W2 修复：焦点恢复重试常量（与主页历史网格同策略） ----
+        /** 焦点恢复重试间隔（毫秒） */
+        private const val FOCUS_RETRY_DELAY_MS = 80L
+
+        /** 焦点恢复最大重试次数（ViewHolder 就绪即提前结束） */
+        private const val FOCUS_RETRY_MAX = 5
     }
 
     private lateinit var host: PairedHost
@@ -96,6 +104,18 @@ class HostBrowserActivity : FragmentActivity() {
 
     /** 404 自愈回退标记：一次连续加载链路中最多自愈一次，防止反复回退清空导航栈 */
     private var selfHealRetried = false
+
+    // ---- 2026-11-09 代码审查 S3 修复：浏览页数据加载并发控制 ----
+    // 此前 loadEntries/loadFolders 每次调用都直接 lifecycleScope.launch(Dispatchers.IO)，
+    // 快速连续导航（连按 BACK、刷新与返回交错）时新旧请求并发，网络返回顺序不保证：
+    // 晚到的旧层级响应会覆盖新层级数据，出现"面包屑与网格内容错位"。
+    // 修复方案：单 Job 串行化——发起新导航前取消上一次未完成的请求，
+    // 保证网格始终只呈现最新一次导航的结果（取消经结构化并发传递到 Ktor 请求）。
+    /** 进行中的文件夹列表加载 Job：新请求发起前取消旧请求 */
+    private var foldersJob: Job? = null
+
+    /** 进行中的目录内容加载 Job：新请求发起前取消旧请求 */
+    private var entriesJob: Job? = null
 
     // ---- 排序（2026-11-07 用户需求：头部「排序」按钮 + 下拉框选择排序方式） ----
 
@@ -330,7 +350,9 @@ class HostBrowserActivity : FragmentActivity() {
 
     /** 加载授权文件夹列表（刷新按钮与页面进入共用；fromRefresh 仅用于成功提示） */
     private fun loadFolders(fromRefresh: Boolean = false) {
-        lifecycleScope.launch(Dispatchers.IO) {
+        // S3 修复：发起新请求前取消上一次未完成的加载，防止旧响应乱序覆盖（见字段注释）
+        foldersJob?.cancel()
+        foldersJob = lifecycleScope.launch(Dispatchers.IO) {
             when (val result = repository.folders(host)) {
                 is ApiResult.Ok -> {
                     folders = result.data
@@ -398,7 +420,12 @@ class HostBrowserActivity : FragmentActivity() {
         val keyword = searchKeyword
         breadcrumb.text = buildBreadcrumb()
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        // S3 修复：发起新导航前取消上一次未完成的加载，防止旧响应乱序覆盖（见字段注释）。
+        // 注意：404 自愈（ApiError 分支内递归调用 loadEntries）会取消自身 Job——
+        // 自愈逻辑在取消前已把新的加载 Job 启动起来，旧 Job 随后以取消状态正常结束，
+        // 新 Job 独立运行不受影响，行为与原先一致。
+        entriesJob?.cancel()
+        entriesJob = lifecycleScope.launch(Dispatchers.IO) {
             val result = when {
                 // 搜索：在当前文件夹内递归；根目录下并行搜索所有授权文件夹后合并
                 keyword != null -> {
@@ -445,19 +472,11 @@ class HostBrowserActivity : FragmentActivity() {
                     // 另：页面刚打开时系统会把窗口焦点自动赋给第一个可聚焦控件
                     // （侧边栏「主页」）——首次成功加载后聚焦第 0 卡，
                     // 让浏览页一打开光标就落在内容上。
-                    // 注意：post 回调可能早于 notifyDataSetChanged 的布局 pass
-                    // （此时取不到 ViewHolder），用 postDelayed 确保布局完成，
-                    // 且仅在成功聚焦时置位 initialFocusDone，失败不吞掉后续机会
+                    // 2026-11-09 审查 W2 修复：固定 postDelayed(200) 一次押注改为
+                    // 短间隔重试（scheduleContentFocusRestore）——低端电视布局
+                    // 超 200ms 时旧方案取不到 ViewHolder，焦点丢失落回侧边栏。
                     if (result.data.isNotEmpty()) {
-                        contentGrid.postDelayed({
-                            val vh = contentGrid.findViewHolderForAdapterPosition(0)
-                            val needFocus = !initialFocusDone ||
-                                (gridHadFocus && !contentGrid.hasFocus())
-                            if (vh != null && needFocus) {
-                                initialFocusDone = true
-                                vh.itemView.findViewById<FrameLayout>(R.id.tile).requestFocus()
-                            }
-                        }, 200)
+                        scheduleContentFocusRestore(gridHadFocus)
                     }
                     if (result.data.isEmpty()) {
                         val hint = when {
@@ -493,6 +512,27 @@ class HostBrowserActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 内容网格焦点恢复（2026-11-09 审查 W2 修复：固定延迟改为短间隔重试）。
+     * 每 80ms 检查一次第 0 卡 ViewHolder 是否就绪，就绪即聚焦（首卡初始聚焦
+     * 或网格曾持有焦点但被数据刷新丢失时）；最多重试 FOCUS_RETRY_MAX 次。
+     * 与主页历史网格 scheduleHistoryFocusRestore 同一策略。
+     */
+    private fun scheduleContentFocusRestore(gridHadFocus: Boolean, attempt: Int = 0) {
+        contentGrid.postDelayed({
+            val vh = contentGrid.findViewHolderForAdapterPosition(0)
+            val needFocus = !initialFocusDone ||
+                (gridHadFocus && !contentGrid.hasFocus())
+            if (vh != null && needFocus) {
+                initialFocusDone = true
+                vh.itemView.findViewById<FrameLayout>(R.id.tile).requestFocus()
+            } else if (vh == null && attempt < FOCUS_RETRY_MAX) {
+                // 布局 pass 尚未完成（ViewHolder 未就绪）：短间隔重试
+                scheduleContentFocusRestore(gridHadFocus, attempt + 1)
+            }
+        }, FOCUS_RETRY_DELAY_MS)
     }
 
     /** API 错误兜底：401 → 引导重新配对；其余 → 面包屑提示 */

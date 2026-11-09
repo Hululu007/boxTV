@@ -50,6 +50,15 @@ class LocalStore(context: Context) {
     private companion object {
         /** SharedPreferences 中设备 UUID 的键 */
         const val KEY_DEVICE_UUID = "device_uuid"
+
+        /**
+         * 播放进度记录上限（2026-11-09 审查 W4 修复）。
+         * 进度列表此前无上限增长：每看一部视频新增一条，播放中每 5 秒还要
+         * 全量重写整个 JSON——低端电视 eMMC 写放大、文件持续膨胀。
+         * 封顶 500 条，超出时按 updatedAt 淘汰最旧记录（历史页展示的
+         * 恰是最近观看，被淘汰的即最不常用条目，语义无损）。
+         */
+        const val MAX_PROGRESS_ENTRIES = 500
     }
 
     @Volatile
@@ -135,10 +144,13 @@ class LocalStore(context: Context) {
     suspend fun saveProgress(progress: PlaybackProgress) {
         mutex.withLock {
             val key = progress.hostDeviceId to progress.videoPath
-            data = data.copy(
-                progress = data.progress
-                    .filter { (it.hostDeviceId to it.videoPath) != key } + progress
-            )
+            // W4 修复：按「其余记录（去掉本条）+ 新记录」重排，再按记录时间从新到旧
+            // 排序后截断到上限（淘汰最旧记录），防止列表无上限膨胀
+            val others = data.progress.filter { (it.hostDeviceId to it.videoPath) != key }
+            val merged = (others + progress)
+                .sortedByDescending { it.updatedAt }
+                .take(MAX_PROGRESS_ENTRIES)
+            data = data.copy(progress = merged)
             saveLocked()
         }
     }

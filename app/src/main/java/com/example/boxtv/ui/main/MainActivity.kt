@@ -47,6 +47,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /**
@@ -177,6 +179,21 @@ class MainActivity : FragmentActivity() {
     companion object {
         /** 网格列数（参照设计稿 5 列） */
         private const val GRID_SPAN = 5
+
+        // ---- 2026-11-09 审查 W2/W3 修复：焦点恢复重试 + 校验并发限流常量 ----
+        // 焦点恢复机制（主页历史网格与浏览页内容网格共用同一策略）：
+        // notifyDataSetChanged 的布局 pass 完成前 findViewHolderForAdapterPosition(0)
+        // 取不到 ViewHolder。此前用固定 postDelayed(200) 一次押注——低端电视布局
+        // 超 200ms 时焦点丢失落回侧边栏。改为短间隔重试：每 80ms 尝试一次，
+        // ViewHolder 就绪即聚焦，最多重试 5 次（总窗口 480ms），既快又稳。
+        /** 焦点恢复重试间隔（毫秒） */
+        private const val FOCUS_RETRY_DELAY_MS = 80L
+
+        /** 焦点恢复最大重试次数（ViewHolder 就绪即提前结束） */
+        private const val FOCUS_RETRY_MAX = 5
+
+        /** 历史校验记录间并发上限（Semaphore 限流，防搜索请求风暴） */
+        private const val HISTORY_VALIDATE_CONCURRENCY = 4
 
         /** 侧边栏页签：主页 */
         const val TAB_HOME = 0
@@ -473,10 +490,12 @@ class MainActivity : FragmentActivity() {
                 return@launch
             }
             if (!quiet) Toast.makeText(this@MainActivity, "正在刷新主机状态…", Toast.LENGTH_SHORT).show()
-            // 逐台 ping（ping 无需鉴权，Ktor 内部为异步 IO）
-            val status = hosts.associate { h ->
-                h.hostDeviceId to (repo.ping(h.host, h.port) is ApiResult.Ok)
-            }
+            // 2026-11-09 审查 W1 修复：并行 ping（此前逐台串行等待，单台超时 10s，
+            // N 台主机最长 10N 秒，期间按钮无反馈近似假死）。多主机并发探测后
+            // 总耗时收敛到单台超时上限，遥控器响应明显加快。
+            val status = hosts.map { h ->
+                async { h.hostDeviceId to (repo.ping(h.host, h.port) is ApiResult.Ok) }
+            }.awaitAll().toMap()
             onlineStatus = status
             // 头部展示中的主机状态即时刷新
             hosts.find { it.hostDeviceId == headerHostId }?.let { updateConnectionText(it) }
@@ -530,16 +549,29 @@ class MainActivity : FragmentActivity() {
 
             // ---- 焦点恢复：数据集变化可能使原聚焦卡片被回收（同浏览页策略） ----
             if (items.isNotEmpty()) {
-                historyGrid.postDelayed({
-                    val vh = historyGrid.findViewHolderForAdapterPosition(0)
-                    val needFocus = !histFocusDone || (gridHadFocus && !historyGrid.hasFocus())
-                    if (vh != null && needFocus) {
-                        histFocusDone = true
-                        vh.itemView.findViewById<FrameLayout>(R.id.tile).requestFocus()
-                    }
-                }, 200)
+                scheduleHistoryFocusRestore(gridHadFocus)
             }
         }
+    }
+
+    /**
+     * 历史网格焦点恢复（2026-11-09 审查 W2 修复：固定延迟改为短间隔重试）。
+     * 每 80ms 检查一次第 0 卡 ViewHolder 是否就绪，就绪即聚焦（首卡初始聚焦
+     * 或网格曾持有焦点但被数据刷新丢失时）；最多重试 FOCUS_RETRY_MAX 次。
+     * 低端电视布局慢时不再出现"200ms 押注落空、焦点掉回侧边栏"。
+     */
+    private fun scheduleHistoryFocusRestore(gridHadFocus: Boolean, attempt: Int = 0) {
+        historyGrid.postDelayed({
+            val vh = historyGrid.findViewHolderForAdapterPosition(0)
+            val needFocus = !histFocusDone || (gridHadFocus && !historyGrid.hasFocus())
+            if (vh != null && needFocus) {
+                histFocusDone = true
+                vh.itemView.findViewById<FrameLayout>(R.id.tile).requestFocus()
+            } else if (vh == null && attempt < FOCUS_RETRY_MAX) {
+                // 布局 pass 尚未完成（ViewHolder 未就绪）：短间隔重试
+                scheduleHistoryFocusRestore(gridHadFocus, attempt + 1)
+            }
+        }, FOCUS_RETRY_DELAY_MS)
     }
 
     /**
@@ -578,14 +610,23 @@ class MainActivity : FragmentActivity() {
         }.awaitAll()
         // 可达性写回 onlineStatus：历史页与主页头部「连接状态」共用一份缓存
         onlineStatus = hostStates.associate { it.host.hostDeviceId to it.reachable }
-        android.util.Log.d(
-            "boxtv-history",
-            "hosts=${hosts.size} reachable=${hostStates.count { it.reachable }} records=${records.size} folders=${hostStates.sumOf { it.folders.size }}"
-        )
+        // W5 修复：debug 日志用 BuildConfig.DEBUG 门控，release 包不再向
+        // logcat 泄露主机/记录数量等内部信息（logcat 权限宽松，任何 app 可读）
+        if (com.example.boxtv.BuildConfig.DEBUG) {
+            android.util.Log.d(
+                "boxtv-history",
+                "hosts=${hosts.size} reachable=${hostStates.count { it.reachable }} records=${records.size} folders=${hostStates.sumOf { it.folders.size }}"
+            )
+        }
 
         // ---- 第二步：主机内影片定位（按文件名递归搜索 + 相对路径精确匹配） ----
-        // 搜索缓存：(hostDeviceId, 查询词) → 搜索结果，避免同查询词重复请求
-        val searchCache = mutableMapOf<Pair<String, String>, List<VideoEntry>>()
+        // 搜索缓存：(hostDeviceId, folderId, 查询词) → 搜索结果，避免同查询词重复请求。
+        // 2026-11-09 审查 W3 修复：缓存键此前漏掉 folderId——同一主机多个授权
+        // 文件夹搜同一文件名时，第二个文件夹会直接命中第一个文件夹的缓存结果，
+        // 路径比对必然失败 → 该文件夹内的影片被误判"已删除"而从历史页过滤掉
+        // （既是正确性缺陷也是重复请求浪费）。补全为三元组键。
+        // ConcurrentHashMap：记录间并行（限流后仍多协程），避免 HashMap 并发写。
+        val searchCache = java.util.concurrent.ConcurrentHashMap<Triple<String, String, String>, List<VideoEntry>>()
         suspend fun findOnHost(state: HostState, videoPath: String): VideoEntry? {
             val segs = videoPath.split('/')
             // 查询词序列：末段文件名 → 上级目录名兜底。
@@ -598,7 +639,7 @@ class MainActivity : FragmentActivity() {
             }
             for (folder in state.folders) {
                 for (query in queries) {
-                    val entries = searchCache.getOrPut(state.host.hostDeviceId to query) {
+                    val entries = searchCache.getOrPut(Triple(state.host.hostDeviceId, folder.id, query)) {
                         when (val r = repo.search(state.host, folder.id, query)) {
                             is ApiResult.Ok -> r.data
                             else -> emptyList()
@@ -615,37 +656,46 @@ class MainActivity : FragmentActivity() {
         }
 
         // ---- 第三步：逐条记录跨主机校验（记录间并行，单条内原主机优先串行） ----
+        // 2026-11-09 审查 W3 修复：记录间并发加 Semaphore 限流（此前 records 全量
+        // 并行，历史累积上百条时瞬间发出数百个搜索请求，弱网低端电视内存/连接
+        // 风暴，页面长时间"检测中"）。限 4 路并发：单条记录内部仍是串行语义。
+        val recordSem = Semaphore(HISTORY_VALIDATE_CONCURRENCY)
         records.map { record ->
             async {
-                val primary = hostStates.firstOrNull {
-                    it.host.hostDeviceId == record.hostDeviceId && it.reachable
+                recordSem.withPermit {
+                    val primary = hostStates.firstOrNull {
+                        it.host.hostDeviceId == record.hostDeviceId && it.reachable
+                    }
+                    // 候选顺序：原主机优先，其余可连接主机兜底（影片被迁移到其他电脑的场景）
+                    val candidates = listOfNotNull(primary) +
+                        hostStates.filter { it.reachable && it !== primary }
+                    for (state in candidates) {
+                        val entry = findOnHost(state, record.videoPath)
+                        // W5 修复：videoPath 属用户观影路径，仅 debug 包输出
+                        if (com.example.boxtv.BuildConfig.DEBUG) {
+                            android.util.Log.d(
+                                "boxtv-history",
+                                "record=${record.videoPath} host=${state.host.name} found=${entry?.videoId}"
+                            )
+                        }
+                        val vid = entry?.videoId ?: continue // 理论不发生（命中即非空），可空性兜底
+                        val percent =
+                            if (record.durationMs > 0)
+                                ((record.positionMs * 100) / record.durationMs).toInt().coerceIn(0, 100)
+                            else 0
+                        return@async HistoryItem(
+                            progress = record,
+                            host = state.host,
+                            videoId = vid,
+                            name = entry.name,
+                            isM3u8 = entry.isM3u8,
+                            percent = percent,
+                            thumbUrl = repo.thumbUrl(state.host, vid),
+                            token = state.host.token
+                        )
+                    }
+                    null // 所有可连接主机均无此影片 → 隐藏该条目
                 }
-                // 候选顺序：原主机优先，其余可连接主机兜底（影片被迁移到其他电脑的场景）
-                val candidates = listOfNotNull(primary) +
-                    hostStates.filter { it.reachable && it !== primary }
-                for (state in candidates) {
-                    val entry = findOnHost(state, record.videoPath)
-                    android.util.Log.d(
-                        "boxtv-history",
-                        "record=${record.videoPath} host=${state.host.name} found=${entry?.videoId}"
-                    )
-                    val vid = entry?.videoId ?: continue // 理论不发生（命中即非空），可空性兜底
-                    val percent =
-                        if (record.durationMs > 0)
-                            ((record.positionMs * 100) / record.durationMs).toInt().coerceIn(0, 100)
-                        else 0
-                    return@async HistoryItem(
-                        progress = record,
-                        host = state.host,
-                        videoId = vid,
-                        name = entry.name,
-                        isM3u8 = entry.isM3u8,
-                        percent = percent,
-                        thumbUrl = repo.thumbUrl(state.host, vid),
-                        token = state.host.token
-                    )
-                }
-                null // 所有可连接主机均无此影片 → 隐藏该条目
             }
         }.awaitAll().filterNotNull()
     }

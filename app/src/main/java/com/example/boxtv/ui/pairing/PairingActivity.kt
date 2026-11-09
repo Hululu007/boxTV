@@ -165,7 +165,13 @@ class PairingStepFragment : GuidedStepSupportFragment() {
     private fun startDiscovery() {
         val repo = (requireActivity().application as BoxTvApp).repository
         val paired = repo.pairedHosts.value
-        viewLifecycleOwner.lifecycleScope.launch {
+        // 2026-11-09 审查 W7 修复：发起新扫描前取消上一次未完成的扫描。
+        // 此前「重新搜索」无防重入——10s 扫描窗口内连按 RESCAN 会并行跑两个
+        // DiscoveryClient（阻塞式 receive 也无法被中断），两个协程都会 setActions
+        // 重建列表：旧扫描晚完成会覆盖新扫描结果，且 setActions 重建会打断
+        // 用户焦点（违反本项目「禁 setActions 重建」约束）。
+        scanJob?.cancel()
+        scanJob = viewLifecycleOwner.lifecycleScope.launch {
             val all = withContext(Dispatchers.IO) {
                 com.example.boxtv.data.discovery.DiscoveryClient().discover(10_000L)
             }
@@ -174,13 +180,14 @@ class PairingStepFragment : GuidedStepSupportFragment() {
                 // 逐个校验"已被发现且本地已配对"的主机授权状态（仅对这些主机发起，数量少）
                 paired.filter { ph -> all.any { it.hostDeviceId == ph.hostDeviceId } }
                     .forEach { ph ->
+                        if (!isActive) return@launch // 扫描已被新请求取消：立即停止
                         val check = withContext(Dispatchers.IO) { repo.folders(ph) }
                         if (check is ApiResult.ApiError && check.isUnauthorized) {
                             // 授权已被电脑端取消：清理本地失效记录
                             withContext(Dispatchers.IO) { repo.removeHost(ph.hostDeviceId) }
                         }
                     }
-                if (!isAdded) return@launch
+                if (!isAdded || !isActive) return@launch
                 // 以移除后的最新配对列表为准做过滤（被取消授权的主机不再被过滤）
                 val pairedIds = repo.pairedHosts.value.map { it.hostDeviceId }.toSet()
                 discovered = all.filter { it.hostDeviceId !in pairedIds }
@@ -382,6 +389,9 @@ class PairingStepFragment : GuidedStepSupportFragment() {
         requestPairing()
     }
 
+    /** 当前 UDP 扫描 Job（W7 修复：重新搜索先取消旧扫描，防止双扫描竞态覆盖结果） */
+    private var scanJob: Job? = null
+
     /** 「等待电脑端允许」的轮询任务：请求发出后自动轮询直至成功/拒绝/超时 */
     private var pendingPollJob: Job? = null
 
@@ -474,7 +484,10 @@ class PairingStepFragment : GuidedStepSupportFragment() {
             .repository.pairedHosts.value.map { it.hostDeviceId }.toSet()
         val list = buildSelectList(emptyList(), pairedIds)
         list[0].title = message
-        list[0].description = "可手动输入 IP 或点击重新搜索"
+        // 2026-11-09：个别电视 WiFi 驱动/路由器会丢弃 UDP 广播包，搜索长期
+        // 无结果时给出可操作的自查指引（单播兜底扫描已内置，此处覆盖仍失败的场景：
+        // 多为路由器开了 AP 隔离/访客网络，或电脑端防火墙未放行 UDP 8965）
+        list[0].description = "已尝试广播与网段扫描仍未发现电脑\n请检查电脑端防火墙已放行 8965/UDP，或手动输入 IP（格式 192.168.1.100:8964）"
         setActions(list)
     }
 

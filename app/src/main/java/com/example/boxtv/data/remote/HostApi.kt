@@ -218,7 +218,11 @@ class HostApi {
     fun streamUrl(host: String, port: Int, videoId: String, quality: String? = null, startSec: Double? = null): String {
         val sb = StringBuilder("http://$host:$port/api/video/stream?videoId=${videoId.encodeURLParameter()}")
         quality?.let { sb.append("&quality=").append(it.encodeURLParameter()) }
-        startSec?.let { sb.append("&start=").append("%.3f".format(it)) }
+        // 2026-11-09 审查 W9 修复：显式指定 Locale.US。
+        // "%.3f".format 默认随系统区域——使用逗号小数符的区域设置（部分出口
+        // 电视/盒子固件 en-DE、fr-FR 等）会生成 "start=0,500"，电脑端解析失败，
+        // 转码清晰度起播/拖动全挂。协议数字参数必须区域无关。
+        startSec?.let { sb.append("&start=").append("%.3f".format(java.util.Locale.US, it)) }
         return sb.toString()
     }
 
@@ -265,6 +269,10 @@ class HostApi {
             }.body<ApiEnvelope>()
             logIfApiError(url, envelope.toResult { json.decodeFromJsonElement<T>(it) })
         }.getOrElse {
+            // 2026-11-09 审查 S2 修复：协程取消异常必须原样透传。
+            // 此前 runCatching 会把 CancellationException 吞成 NetworkError，破坏结构化
+            // 并发的取消语义（离开页面时产生假"网络失败"、轮询循环多跑一轮）。
+            if (it is kotlinx.coroutines.CancellationException) throw it
             android.util.Log.w("boxtv-api", "网络异常 $url: ${it.javaClass.simpleName}: ${it.message}")
             ApiResult.NetworkError(it.message ?: "网络请求失败")
         }
@@ -278,6 +286,8 @@ class HostApi {
             }.body<ApiEnvelope>()
             logIfApiError(url, envelope.toResult { json.decodeFromJsonElement<T>(it) })
         }.getOrElse {
+            // S2 修复：同 execute——CancellationException 透传，不吞为网络错误
+            if (it is kotlinx.coroutines.CancellationException) throw it
             android.util.Log.w("boxtv-api", "网络异常 $url: ${it.javaClass.simpleName}: ${it.message}")
             ApiResult.NetworkError(it.message ?: "网络请求失败")
         }
@@ -290,6 +300,8 @@ class HostApi {
             }.body<ApiEnvelope>()
             logIfApiError(url, envelope.toResult { json.decodeFromJsonElement<D>(it) })
         }.getOrElse {
+            // S2 修复：同 execute——CancellationException 透传，不吞为网络错误
+            if (it is kotlinx.coroutines.CancellationException) throw it
             android.util.Log.w("boxtv-api", "网络异常 $url: ${it.javaClass.simpleName}: ${it.message}")
             ApiResult.NetworkError(it.message ?: "网络请求失败")
         }
